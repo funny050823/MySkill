@@ -7,7 +7,7 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 
 ## 为什么有这个技能
 
-`KResourceReader` 里的 `Ani::ReadFile`(`kg_ani::Ani`)是引擎 `KG3D_Animation::LoadFromFile` 的**复刻**,解析 `.ani` 动画文件,抽出动画类型/骨骼数/顶点数/是否抽帧供资源检查。引擎新增/改动画类型(`KG3D_ANIMATION_TYPE`)、文件 mask(`ANI_FILE_MASK_*`)、结构体时,复刻没跟上就会**漏抽**(骨骼/顶点数读错或不读)。
+`KResourceReader` 里的 `Ani::ReadFile`(`kg_ani::Ani`)是引擎 `KG3D_Animation::LoadFromFile` 的**复刻**,解析 `.ani` 动画文件,抽出动画类型/骨骼数/顶点数/是否抽帧/文件版本 mask 供资源检查。引擎新增/改动画类型(`KG3D_ANIMATION_TYPE`)、文件 mask(`ANI_FILE_MASK_*`)、结构体时,复刻没跟上就会**漏抽**(骨骼/顶点数读错、mask 落 default)。
 
 ⚠️ 与 Pss/Kmsc 不同:**Ani 无音频标签**;抽取信息只有 4 个成员(不是三类);Ani::ReadFile **不经 reader 工厂 `AddFileType`**,而经 `KResChecker→GetAniInfo→KBase::GetAniInfo→Ani::ScanFile→ReadFile` 调用(见 §5)。复刻 `default` 不 `KG_PROCESS_ERROR`(**不硬失败**,落 default 只是漏抽该类型信息,不挂整个文件)——所以 ani 落后多表现为"漏抽/读错",少表现为"解析失败"。
 
@@ -58,7 +58,7 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 
 引擎 `LoadFromFile` 读 `_ANI_FILE_HEADER` → 按 `dwType`(`KG3D_ANIMATION_TYPE`)分派 → 再按 `dwMask`(`ANI_FILE_MASK_*`)分派读不同结构。复刻 `Ani::ReadFile` 同构(读 header → `switch(m_dwType)` → `switch(m_pHead->dwMask)`)。差异从**类型层 + mask 层 + 结构层**查。
 
-⚠️ **关键**:复刻只需抽 4 个成员(§3),都从头部结构取,**不需要读后续骨骼/顶点数据**(引擎读 RTS/骨骼名等海量数据,复刻不读——这是有意的,不算落后)。所以比对重点是"**头部结构定义 + 类型/mask 分派是否覆盖**",不是逐字节读全部。
+⚠️ **关键**:复刻只需抽 5 个成员(§3),都从头部结构取,**不需要读后续骨骼/顶点数据**(引擎读 RTS/骨骼名等海量数据,复刻不读——这是有意的,不算落后)。所以比对重点是"**头部结构定义 + 类型/mask 分派是否覆盖**",不是逐字节读全部。
 
 ### 2.1 类型层(`KG3D_ANIMATION_TYPE`)
 - 引擎枚举全集:从 `KG3D_Animation.h` 取所有 `ANIMATION_*`。
@@ -69,7 +69,7 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 ### 2.2 mask 层(`ANI_FILE_MASK_*`)
 - 引擎/复刻 mask 常量:`ANI_FILE_MASK`/`ANI_FILE_MASK_EF`/`ANI_FILE_MASK_VERVION2_EF`/`ANI_FILE_MASK_VERVION3`/`ANI_FILE_MASK_VERVION2`/`ANI_FILE_MASK_COMPRESS` 等。
 - 复刻每个类型(BONE_RTS/VERTICES)的 `switch(dwMask)` 覆盖 `MASK`/`MASK_EF`/`VERVION2_EF`,`default` 读 VERSION2 结构。
-- 差异:引擎新增 mask(新版本格式)→ 复刻补 case + 对应结构。`ANI_FILE_MASK_VERVION3`(Rust Clip)复刻特判报"新 clip 资源"并 success(同引擎,剑三未用)。
+- 差异:引擎新增 mask(新版本格式)→ 复刻补 case + 对应结构,且 `GetAniMaskTypeMap()` 补该 mask+描述(见 §3 `m_dwMask` 抽取要点的三处都补)。`ANI_FILE_MASK_VERVION3`(Rust Clip)复刻特判报"新 clip 资源"并 success(同引擎,剑三未用)。
 
 ### 2.3 结构层
 - 引擎 `_ANI_FILE_HEADER`/`_BONE_ANI`/`_BONE_ANI_EF`/`_BONE_ANI_VERSION2`/`_BONE_ANI_VERSION2_EF`/`_VERTEX_ANI`/`_VERTEX_ANI_EF`/`_VERTEX_ANI_VERSION2`/`_VERTEX_ANI_VERSION2_EF` 等。
@@ -81,15 +81,21 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 
 ## 3. 抽取信息（同步时的不变量，必须守）
 
-Ani 只抽 **4 个成员**(不是 Pss 的三类,无音频、无明文路径):
+Ani 只抽 **5 个成员**(不是 Pss 的三类,无音频、无明文路径):
 | 成员 | 含义 | 来源 | 落库 |
 |---|---|---|---|
 | `m_dwType` | 动画类型(`ANIMATION_BONE_RTS`/`ANIMATION_VERTICES`/...) | `_ANI_FILE_HEADER.dwType` | 决定 IsBone/IsVertex,不入 Ani 表 |
 | `m_dwNumBones` | 骨骼动画的骨骼数(骨骼动画>0,否则0) | `_BONE_ANI*.dwNumBones`(BONE_RTS 分支) | Ani 表 `BoneCnt` |
 | `m_dwNumAnimatedVertices` | 顶点动画的顶点数(顶点动画>0,否则0) | `_VERTEX_ANI*.dwNumAnimatedVertices`(VERTICES 分支) | Ani 表 `VertexCnt` |
 | `m_bKeyFrame` | 是否抽帧 ani | mask 是 `*_EF` 时置 true | 不入库,用于检查逻辑(KResChecker) |
+| `m_dwMask` | Ani 文件版本 mask(`ANI_FILE_MASK`/`_VERVION2`/`_EF`/`_VERVION3` 等) | `_ANI_FILE_HEADER.dwMask`(`Ani.cpp` `m_dwMask = m_pHead->dwMask`) | Ani 表 `dwMask` 列(`InsertAniResult` 第4列,`insert into Ani (FilePath,BoneCnt,VertexCnt,dwMask)`);另 `AniMask` 表存 mask 值→中文描述映射(由 `GetAniMaskTypeMap()` 填) |
 
-**同步任何新类型/mask/结构时,确保对应分支仍正确抽这 4 个**(尤其 `dwNumBones`/`dwNumAnimatedVertices` 从正确结构的正确字段取)。这是 Ani 技能的"不变量"——同步不该改变现有 ani 的 BoneCnt/VertexCnt。
+**`m_dwMask` 抽取要点**:
+- `Ani::ReadFile` 开头 `m_dwMask = m_pHead->dwMask` 取文件版本 mask,**在类型/mask 分派之前**(所有分支共用,必须先取)。
+- mask 值→描述映射在 `Ani::GetAniMaskTypeMap()`(静态,列 7 个 `ANI_FILE_MASK_*` 常量及描述),经 `KBase::GetAniMaskTypeMap()` 暴露给报告层,落 `AniMask` 表(`Mask,Msg`)。
+- 同步新增 mask(引擎新版本格式)时:**①** `Ani.h` 加 `ANI_FILE_MASK_*` 常量;**②** `GetAniMaskTypeMap()` 里 `emplace_back` 补该 mask+描述;**③** `ReadFile` 的 mask 分派(`switch(m_pHead->dwMask)`)补 case。三处都补,否则新 mask 的 ani 落 default、AniMask 表缺映射。
+
+**同步任何新类型/mask/结构时,确保对应分支仍正确抽这 5 个**(尤其 `dwNumBones`/`dwNumAnimatedVertices` 从正确结构的正确字段取、`m_dwMask` 在分派前先取)。这是 Ani 技能的"不变量"——同步不该改变现有 ani 的 BoneCnt/VertexCnt/Mask。
 
 ---
 
@@ -142,7 +148,7 @@ ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
 - 报告目录:`x64\Release\logs\JX3\trunk\` 下最新时间戳子目录。`ls -t logs/JX3/trunk/ | head -1`。
 - `Scan.log`:末尾应类似 `... INFO 日志正常关闭`。
 - `ScanResult.db`(Ani 技能关注这两表):
-  - **`Ani`**:每行一个解析成功的 ani,字段 `FilePath,BoneCnt,VertexCnt`(=§3 的 m_dwNumBones/m_dwNumAnimatedVertices)。本机约 23 万行。
+  - **`Ani`**:每行一个解析成功的 ani,字段 `FilePath,BoneCnt,VertexCnt`(+ 新版 exe 加 `dwMask` 列;=§3 的 m_dwNumBones/m_dwNumAnimatedVertices/m_dwMask)。本机约 23 万行。另有 `AniMask` 表(`Mask,Msg`)存 mask 值→中文描述映射。
   - **`Result`**:`ErrLevel=7` 且 `File` 以 `.ani` 结尾(或 `ExtName=ani`)= 解析失败。Ani 落后多表现为漏抽(Ani 表字段错)而非失败。
   - 关联视图:`ResultAni`/`ResultAniBoneOver`/`ResultAniVertexOver`(骨骼/顶点数超标告警)。
 
@@ -160,7 +166,7 @@ ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
 python ".claude/skills/Ani代码同步/scripts/diff_ani.py" "<baseline.db>" "<current.db>" --knownbad "<清单,可选>"
 ```
 脚本输出(同 Pss 的 diff 思路):
-- **regressed(回归)**:baseline 在 `Ani` 表(曾解析 OK)→ current 不在(现在失败),或在但 `BoneCnt`/`VertexCnt` 变了。**非空 → 本轮不通过,回滚重来。** 理由:同步不该改现有 ani 的骨骼/顶点数;变了就是引入错位/漏抽。
+- **regressed(回归)**:baseline 在 `Ani` 表(曾解析 OK)→ current 不在(现在失败),或在但 `BoneCnt`/`VertexCnt`/`dwMask` 变了。**非空 → 本轮不通过,回滚重来。** 理由:同步不该改现有 ani 的骨骼/顶点数/文件版本 mask;变了就是引入错位/漏抽。(dwMask 仅当两侧 db 都有 `dwMask` 列时比;`diff_ani.py` 自动兼容旧 db 无该列的情况,只比 BoneCnt/VertexCnt)
 - **improved(改善)**:baseline 失败 → current 进 `Ani` 表。本轮目标文件应在此。
 - **still_failing**:两次都失败(`ErrLevel=7` .ani)。与 `--knownbad` 交集 = 预期坏文件,不计回归;其余待人工裁定。
 - **new_fail**:baseline 没扫到、current 却失败(异常)。
@@ -182,7 +188,7 @@ A. 基线:  regen_scanlist.py 生成全量 ani 清单 → 跑扫描器(§5.2)得
 B. 比对:  按 §2 三层(类型/mask/结构)比对复刻↔引擎,列当轮待同步项
           (注意 BINDPOSE_UPDATE 等先核实是否真序列化进 .ani,像 Pss 的 UIBOUND)
 C. 改码:  改 Ani.cpp/Ani.h(UTF-8,Edit/Write 安全)同步该类型/mask/结构;
-          同步时核 §3 四成员是否仍正确抽取
+          同步时核 §3 五成员是否仍正确抽取
 D. 编译:  §4 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C
 E. 测试:  用 baseline 同一份清单 → 跑扫描器 → current ScanResult.db
 F. 判据:  diff_ani.py baseline vs current
@@ -200,7 +206,7 @@ G. 终止:  B 无待同步项 且 F 无回归 且 无非 known-bad 新失败 →
 - **回滚要干净**:regressed 时把 `Ani.cpp`/`Ani.h` 恢复到本轮改前状态(改前 `cp` 备份到临时目录最稳)。
 - **编码**:源码 UTF-8 可 Edit/Write;`ScanFileList_ani.txt`、`.cmd` 是 GBK,**只用脚本/GBK 感知方式写,别用 Edit/Write**。
 - **全量是默认**:~23 万文件/轮,实测 ~47 秒。子集(`--subset`)只用于迭代试错,终止判据仍以全量无回归为准。
-- **四成员**:每轮同步后核 §3 四成员是否补齐——这是"假成功"主要来源(ani 无音频、无路径,只这 4 个)。
+- **五成员**:每轮同步后核 §3 五成员是否补齐(type/numBones/numAnimatedVertices/bKeyFrame/mask)——这是"假成功"主要来源(ani 无音频、无路径,只这 5 个)。
 - **不改引擎**:引擎文件只读对标,绝不修改。
 
 ---

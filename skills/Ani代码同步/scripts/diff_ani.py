@@ -8,14 +8,15 @@ diff_ani.py — 对比两次全量 ani 扫描的 ScanResult.db,给出"Ani 表 + 
 
 判据(与 SKILL.md §6 一致;Ani 无音频):
   regressed(回归)  : baseline 在 Ani 表(曾解析 OK) -> current 不在 Ani(现在失败),
-                     或在但 BoneCnt/VertexCnt 变了。非空 => 本轮不通过,回滚重来。
+                     或在但 BoneCnt/VertexCnt/Mask 变了。非空 => 本轮不通过,回滚重来。
+                     (Mask 仅当两侧 db 都有 Mask 列时才比;旧 exe 的 db 无 Mask 列则只看 BoneCnt/VertexCnt)
   improved(改善)   : baseline 解析失败 -> current 进了 Ani 表。本轮目标文件应在此。
   still_failing    : 两次都失败(ErrLevel=7 且 .ani)。与 --knownbad 交集 = 预期坏文件,不计回归;
                      其余 = 待人工裁定。
   new_fail         : baseline 没扫到、current 却失败的(同清单下一般不出现,出现即异常)。
 
 数据来源(ScanResult.db,Ani 技能只关注 Ani + Result,无 AudioLabel):
-  Ani    : FilePath(主键),BoneCnt,VertexCnt(=§3 的 m_dwNumBones/m_dwNumAnimatedVertices)
+  Ani    : FilePath(主键),BoneCnt,VertexCnt,Mask(=§3 的 m_dwNumBones/m_dwNumAnimatedVertices/m_dwMask;Mask 列新版 exe 才有)
   Result : ErrLevel=7 且 File 以 .ani 结尾(或 ExtName=ani) = 解析失败
 
 用法:
@@ -49,14 +50,28 @@ def connect(db):
 
 
 def read_ani(db):
-    """读 Ani 表: {norm(FilePath): (BoneCnt, VertexCnt)}。表缺失返回 {}。"""
+    """读 Ani 表: {norm(FilePath): (BoneCnt, VertexCnt, Mask)}。
+    Mask 列(新版 exe 产出的 Ani 表有,旧版无)若存在则读、纳入签名;不存在则该位置置 None。
+    返回 (dict, has_mask_col)。表缺失返回 ({}, False)。"""
     out = {}
+    has_mask = False
     try:
         con = connect(db)
-        cur = con.execute("SELECT FilePath, BoneCnt, VertexCnt FROM Ani")
-        for r in cur.fetchall():
-            out[norm(r["FilePath"])] = (r["BoneCnt"] if r["BoneCnt"] is not None else 0,
-                                         r["VertexCnt"] if r["VertexCnt"] is not None else 0)
+        # 探测有无 Mask 列
+        cols = [row[1] for row in con.execute("PRAGMA table_info(Ani)").fetchall()]
+        has_mask = "dwMask" in cols
+        if has_mask:
+            cur = con.execute("SELECT FilePath, BoneCnt, VertexCnt, dwMask FROM Ani")
+            for r in cur.fetchall():
+                out[norm(r["FilePath"])] = (r["BoneCnt"] if r["BoneCnt"] is not None else 0,
+                                             r["VertexCnt"] if r["VertexCnt"] is not None else 0,
+                                             r["dwMask"])
+        else:
+            cur = con.execute("SELECT FilePath, BoneCnt, VertexCnt FROM Ani")
+            for r in cur.fetchall():
+                out[norm(r["FilePath"])] = (r["BoneCnt"] if r["BoneCnt"] is not None else 0,
+                                             r["VertexCnt"] if r["VertexCnt"] is not None else 0,
+                                             None)
         con.close()
     except sqlite3.Error as e:
         if "no such table" not in str(e):
@@ -64,7 +79,7 @@ def read_ani(db):
     except RuntimeError as e:
         print("错误: %s" % e, file=sys.stderr)
         raise
-    return out
+    return out, has_mask
 
 
 def read_fail(db):
@@ -121,10 +136,12 @@ def main():
 
     kb = load_knownbad(args.knownbad)
 
-    b_ani = read_ani(args.baseline)
+    b_ani, b_has_mask = read_ani(args.baseline)
     b_fail = read_fail(args.baseline)
-    c_ani = read_ani(args.current)
+    c_ani, c_has_mask = read_ani(args.current)
     c_fail = read_fail(args.current)
+    # Mask 列仅当两侧 db 都有时才参与回归比较(旧 exe 的 db 无 Mask 列,跨版本比只看 BoneCnt/VertexCnt)
+    cmp_mask = b_has_mask and c_has_mask
 
     all_files = set(b_ani) | set(c_ani) | b_fail | c_fail
 
@@ -133,6 +150,11 @@ def main():
     still_failing = []
     new_fail = []
     stable = 0
+
+    def sig(row):
+        """回归比较签名:BoneCnt/VertexCnt 总比;Mask 仅 cmp_mask 时纳入。"""
+        bone, vert, mask = row
+        return (bone, vert, mask) if cmp_mask else (bone, vert)
 
     for f in all_files:
         bp = f in b_ani
@@ -143,9 +165,9 @@ def main():
             if not cp:
                 regressed.append({"file": f, "from": "parsed", "to": "failed" if cf else "absent"})
             else:
-                # 都解析了,比 BoneCnt/VertexCnt
-                if b_ani[f] != c_ani[f]:
-                    regressed.append({"file": f, "from": "parsed%s" % (b_ani[f],), "to": "parsed%s" % (c_ani[f],)})
+                # 都解析了,比 BoneCnt/VertexCnt(及两侧都有的 Mask)
+                if sig(b_ani[f]) != sig(c_ani[f]):
+                    regressed.append({"file": f, "from": "parsed%s" % (sig(b_ani[f]),), "to": "parsed%s" % (sig(c_ani[f]),)})
                 else:
                     stable += 1
         else:
