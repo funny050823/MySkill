@@ -71,7 +71,7 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 - 复刻每个类型(BONE_RTS/VERTICES)的 `switch(dwMask)` 覆盖 `MASK`/`MASK_EF`/`VERVION2_EF`,`default` 读 VERSION2 结构。
 - 差异:引擎新增 mask(新版本格式)→ 复刻补 case + 对应结构,且 `GetAniMaskTypeMap()` 补该 mask+描述(见 §3 `m_dwMask` 抽取要点的三处都补)。`ANI_FILE_MASK_VERVION3`(Rust Clip,0x4D494E41)**已对齐**:复刻用 `clip::Clip`(现成 Rust 库)解析抽 `m_dwNumBones`,不再直接退出(详见 §4 构建/VERVION3 说明)。
 </br>
-> **VERVION3(Rust clip)解析说明**:引擎 `KG3D_Animation::LoadFromFile:1548` 用 `clip::Clip`→`Import(buf,len)`→`GetBoneCount()` 抽骨骼数。复刻 `Ani.cpp` 同样用 `clip::Clip`(基类 `m_pbyBuffer` 整文件 buffer 作 Import 入参),`m_bKeyFrame` 保持 false;`BoneCnt==0`(资源异常)由解析时 `OnReadResourceFileByGBK` 报(不是 diff 判)。**构建依赖**:复刻工程链 `ClipLibX64.lib`+`KESMBaseX64.lib`(import lib,头在 `$JX3ENGINE_Sword3%\Source\Common\RUST\ClipLib` 与 `KESMBase`),运行时依赖 `ClipLibX64.dll`/`KESMBaseX64.dll`——已由 vcxproj `PostBuildEvent` 用环境变量自动拷到 `$(OutDir)`,换机器/重编译不漏。
+> **VERVION3(Rust clip)解析说明**:引擎 `KG3D_Animation::LoadFromFile:1548` 用 `clip::Clip`→`Import(buf,len)`→`GetBoneCount()` 抽骨骼数。复刻 `Ani.cpp` 同样用 `clip::Clip`(基类 `m_pbyBuffer` 整文件 buffer 作 Import 入参),`m_bKeyFrame` 保持 false;`BoneCnt==0`(资源异常)由解析时 `OnErrorByGBK(ErrorLevel::ERROR_LEVEL_TOOL_ERR, ErrorType::ERROR_TYPE_RES_READ_EXCEPT, ...)` 报(不是 diff 判;Import 失败也用此报)。**构建依赖**:复刻工程链 `ClipLibX64.lib`+`KESMBaseX64.lib`(import lib,头在 `$JX3ENGINE_Sword3%\Source\Common\RUST\ClipLib` 与 `KESMBase`),运行时依赖 `ClipLibX64.dll`/`KESMBaseX64.dll`——已由 vcxproj `PostBuildEvent` 用环境变量自动拷到 `$(OutDir)`,换机器/重编译不漏。
 
 ### 2.3 结构层
 - 引擎 `_ANI_FILE_HEADER`/`_BONE_ANI`/`_BONE_ANI_EF`/`_BONE_ANI_VERSION2`/`_BONE_ANI_VERSION2_EF`/`_VERTEX_ANI`/`_VERTEX_ANI_EF`/`_VERTEX_ANI_VERSION2`/`_VERTEX_ANI_VERSION2_EF` 等。
@@ -161,7 +161,7 @@ ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
 
 ## 6. 差异对比（闭环的"看变化"）
 
-`diff_ani.py` 是**纯差异工具**:只列修改前后数据差异,**不判断差异算回归还是改善**(好坏由报告/Claude 人工裁定)。资源对错(如 VERVION3 `BoneCnt==0`)是 `Ani.cpp` 解析时 `OnReadResourceFileByGBK` 报异常的职责,不是 diff 的职责。
+`diff_ani.py` 是**纯差异工具**:只列修改前后数据差异,**不判断差异算回归还是改善**(好坏由报告/Claude 人工裁定)。资源对错(如 VERVION3 `BoneCnt==0`)是 `Ani.cpp` 解析时 `OnErrorByGBK(ERROR_LEVEL_TOOL_ERR, ...)` 报异常的职责,不是 diff 的职责。
 
 每轮:改码前跑一次全量当 baseline,改+编译后跑一次当 current,对比两份 `ScanResult.db`:
 ```bash
@@ -181,7 +181,7 @@ python ".claude/skills/Ani代码同步/scripts/diff_ani.py" "<baseline.db>" "<cu
 - `changed`/`appeared` 里属于**本轮目标**(如本次 VERVION3)= 预期改善,通过。
 - `changed` 里属于**不该碰的类型**(如骨骼动画 BoneCnt 莫名变了)= 回归,回滚重来。
 - `disappeared`/`new_fail` = 需关注,逐个排查。
-- 资源异常(VERVION3 `BoneCnt==0`)由 Ani.cpp 已 `OnReadResourceFileByGBK` 报出,在 `Result` 表里看,不在 diff 判。
+- 资源异常(VERVION3 `BoneCnt==0`)由 Ani.cpp 已 `OnErrorByGBK(ERROR_LEVEL_TOOL_ERR, ...)` 报出,在 `Result` 表里看,不在 diff 判。
 
 **整个闭环终止** = §2 差异比对无待同步项 且 diff 列出的差异全部裁定为"预期"(无意外 `disappeared`/`new_fail`/非目标 `changed`) 且 无 `still_failing` 之外的新失败。
 
