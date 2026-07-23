@@ -27,11 +27,11 @@ import os
 import sqlite3
 import sys
 
-# Ani 技能关注的 ScanResult.db 表(无 AudioLabel)
+# Ani 技能关注的 ScanResult.db 表(无 AudioLabel)。Ani 表 Mask 列新版 exe 才有,read_table 兼容缺失。
 SCAN_TABLES = {
     "FileList": ["File", "ExtName", "translated_size", "changed_revision", "changed_date"],
     "Result": ["ErrType", "ErrLevel", "ResType", "File", "ExtName", "SonFile", "SonExtName", "Msg"],
-    "Ani": ["FilePath", "BoneCnt", "VertexCnt"],
+    "Ani": ["FilePath", "BoneCnt", "VertexCnt", "Mask"],
 }
 
 
@@ -46,6 +46,12 @@ def read_table(db, table, cols):
     try:
         con = sqlite3.connect(db)
         con.row_factory = sqlite3.Row
+        # 探测表实际有哪些列,去掉不存在的(如 Ani.Mask 列旧版 exe 的 db 没有)
+        actual = {row[1] for row in con.execute("PRAGMA table_info(%s)" % table).fetchall()}
+        cols = [c for c in cols if c in actual]
+        if not cols:
+            con.close()
+            return out
         col_sql = ",".join(cols)
         cur = con.execute("SELECT %s FROM %s" % (col_sql, table))
         for r in cur.fetchall():
