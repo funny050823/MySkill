@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-diff_ani.py — 对比两次全量 ani 扫描的 ScanResult.db,给出"Ani 表 + 失败集"回归判据。
+diff_ani.py — 纯差异工具:对比两次全量 ani 扫描的 ScanResult.db,列出修改前后数据差异。
 
 用途: Ani代码同步技能里,改复刻代码前跑一次全量得 baseline.db,改+编译后再跑一次
-      得 current.db,用本脚本对比,判断本轮同步是否引入回归、目标文件是否改善。
+      得 current.db,用本脚本列出差异(哪些 ani 的 BoneCnt/VertexCnt/dwMask 变了)。
 
-判据(与 SKILL.md §6 一致;Ani 无音频):
-  regressed(回归)  : baseline 在 Ani 表(曾解析 OK) -> current 不在 Ani(现在失败),
-                     或在但 BoneCnt/VertexCnt/Mask 变了。非空 => 本轮不通过,回滚重来。
-                     (Mask 仅当两侧 db 都有 Mask 列时才比;旧 exe 的 db 无 Mask 列则只看 BoneCnt/VertexCnt)
-  improved(改善)   : baseline 解析失败 -> current 进了 Ani 表。本轮目标文件应在此。
-  still_failing    : 两次都失败(ErrLevel=7 且 .ani)。与 --knownbad 交集 = 预期坏文件,不计回归;
-                     其余 = 待人工裁定。
-  new_fail         : baseline 没扫到、current 却失败的(同清单下一般不出现,出现即异常)。
+重要: 本脚本只报"差异",不判断差异算回归还是改善——好坏由报告/Claude 人工裁定。
+      资源对错(如 VERVION3 BoneCnt==0)是 Ani.cpp 解析时 OnReadResourceFileByGBK 报异常的职责,不是 diff 的职责。
+
+差异类别:
+  changed        : 两侧都在 Ani 表,但 BoneCnt/VertexCnt/dwMask 变了(中性,不判好坏)
+  appeared       : current 新进 Ani 表(baseline 不在:曾失败/未扫到)——如修复漏抽
+  disappeared    : baseline 在 Ani 表、current 不在了(现在失败/未扫到)——需关注
+  still_failing  : 两侧都失败(ErrLevel=7 且 .ani)。与 --knownbad 交集 = 预期坏文件;其余待人工裁定
+  new_fail       : baseline 没扫到、current 却失败的(同清单下一般不出现,出现即异常)
+  stable         : 两侧都在 Ani 表且字段完全相同
 
 数据来源(ScanResult.db,Ani 技能只关注 Ani + Result,无 AudioLabel):
-  Ani    : FilePath(主键),BoneCnt,VertexCnt,Mask(=§3 的 m_dwNumBones/m_dwNumAnimatedVertices/m_dwMask;Mask 列新版 exe 才有)
+  Ani    : FilePath(主键),BoneCnt,VertexCnt,dwMask(=§3 的 m_dwNumBones/m_dwNumAnimatedVertices/m_dwMask;dwMask 列新版 exe 才有)
   Result : ErrLevel=7 且 File 以 .ani 结尾(或 ExtName=ani) = 解析失败
+  (dwMask 仅当两侧 db 都有 dwMask 列时才参与比较;旧 exe 的 db 无 dwMask 列则只比 BoneCnt/VertexCnt)
 
 用法:
   python diff_ani.py <baseline.db> <current.db> [--knownbad FILE] [--json] [--quiet]
 
-退出码: 0 无回归; 1 有回归(regressed 或 new_fail 非空); 2 输入异常。
+退出码: 0 正常(差异已列出,好坏人工裁定); 1 异常(new_fail 非空); 2 输入异常。
+         差异本身不导致 exit1——diff 是纯差异工具,不替你判回归。
 """
 import argparse
 import json
@@ -145,14 +149,17 @@ def main():
 
     all_files = set(b_ani) | set(c_ani) | b_fail | c_fail
 
-    regressed = []
-    improved = []
-    still_failing = []
-    new_fail = []
+    # 纯差异比较:只报修改前后数据差异,不判断差异算回归还是改善(好坏由报告/Claude 人工裁定)。
+    # 资源对错(如 VERVION3 BoneCnt==0)是 Ani.cpp 解析时 OnReadResourceFileByGBK 报异常的职责,不是 diff 的职责。
+    changed = []      # 两侧都在 Ani 表,但 BoneCnt/VertexCnt/dwMask 变了
+    appeared = []      # current 新进 Ani 表(baseline 不在:失败/未扫到)
+    disappeared = []   # baseline 在 Ani 表,current 不在了(现在失败/未扫到)
+    still_failing = [] # 两侧都失败(ErrLevel=7 .ani)
+    new_fail = []      # baseline 没扫到、current 失败
     stable = 0
 
     def sig(row):
-        """回归比较签名:BoneCnt/VertexCnt 总比;Mask 仅 cmp_mask 时纳入。"""
+        """差异签名:BoneCnt/VertexCnt 总比;dwMask 仅 cmp_mask 时纳入。"""
         bone, vert, mask = row
         return (bone, vert, mask) if cmp_mask else (bone, vert)
 
@@ -163,17 +170,17 @@ def main():
         cf = f in c_fail
         if bp:
             if not cp:
-                regressed.append({"file": f, "from": "parsed", "to": "failed" if cf else "absent"})
+                disappeared.append({"file": f, "from": "parsed", "to": "failed" if cf else "absent"})
             else:
-                # 都解析了,比 BoneCnt/VertexCnt(及两侧都有的 Mask)
+                # 两侧都在 Ani 表,比字段是否变化(不判好坏)
                 if sig(b_ani[f]) != sig(c_ani[f]):
-                    regressed.append({"file": f, "from": "parsed%s" % (sig(b_ani[f]),), "to": "parsed%s" % (sig(c_ani[f]),)})
+                    changed.append({"file": f, "from": "%s" % (sig(b_ani[f]),), "to": "%s" % (sig(c_ani[f]),)})
                 else:
                     stable += 1
         else:
-            # baseline 非 parsed
+            # baseline 不在 Ani 表
             if cp:
-                improved.append({"file": f, "from": "failed" if bf else "absent", "to": "parsed"})
+                appeared.append({"file": f, "from": "failed" if bf else "absent", "to": "parsed"})
             elif cf:
                 if bf:
                     still_failing.append({"file": f})
@@ -189,8 +196,9 @@ def main():
         "baseline_failed": len(b_fail),
         "current_failed": len(c_fail),
         "stable": stable,
-        "regressed": len(regressed),
-        "improved": len(improved),
+        "changed": len(changed),
+        "appeared": len(appeared),
+        "disappeared": len(disappeared),
         "still_failing": len(still_failing),
         "still_failing_knownbad": len(still_knownbad),
         "still_failing_unknown": len(still_unknown),
@@ -200,8 +208,9 @@ def main():
         "baseline": args.baseline,
         "current": args.current,
         "counts": c_counts,
-        "regressed": regressed,
-        "improved": improved,
+        "changed": changed,
+        "appeared": appeared,
+        "disappeared": disappeared,
         "still_failing_knownbad": still_knownbad,
         "still_failing_unknown": still_unknown,
         "new_fail": new_fail,
@@ -214,30 +223,38 @@ def main():
     if not args.quiet:
         print("baseline: parsed=%d failed=%d" % (c_counts["baseline_parsed"], c_counts["baseline_failed"]), file=hf)
         print("current : parsed=%d failed=%d" % (c_counts["current_parsed"], c_counts["current_failed"]), file=hf)
-        print("stable=%d  improved=%d  regressed=%d  still_failing=%d(knownbad=%d unknown=%d)  new_fail=%d" %
-              (c_counts["stable"], c_counts["improved"], c_counts["regressed"], c_counts["still_failing"],
-               c_counts["still_failing_knownbad"], c_counts["still_failing_unknown"], c_counts["new_fail"]), file=hf)
-        if regressed:
-            print("\n[回归] 以下 ani 曾解析正常,本轮被破坏(必须回滚):", file=hf)
-            for x in regressed[:20]:
+        print("stable=%d  changed=%d  appeared=%d  disappeared=%d  still_failing=%d(knownbad=%d unknown=%d)  new_fail=%d" %
+              (c_counts["stable"], c_counts["changed"], c_counts["appeared"], c_counts["disappeared"],
+               c_counts["still_failing"], c_counts["still_failing_knownbad"], c_counts["still_failing_unknown"],
+               c_counts["new_fail"]), file=hf)
+        if changed:
+            print("\n[差异-字段变化] 以下 ani 的 BoneCnt/VertexCnt/dwMask 修改前后不同(好坏由人裁定,不自动判回归):", file=hf)
+            for x in changed[:20]:
                 print("  %s  (%s -> %s)" % (x["file"], x["from"], x["to"]), file=hf)
-            if len(regressed) > 20:
-                print("  ... 另有 %d 条" % (len(regressed) - 20), file=hf)
-        if improved:
-            print("\n[改善] 以下 ani 由失败转为解析成功:", file=hf)
-            for x in improved[:20]:
+            if len(changed) > 20:
+                print("  ... 另有 %d 条" % (len(changed) - 20), file=hf)
+        if appeared:
+            print("\n[差异-新进Ani表] 以下 ani baseline 不在 Ani 表、current 进了(如修复漏抽):", file=hf)
+            for x in appeared[:20]:
                 print("  %s  (%s -> parsed)" % (x["file"], x["from"]), file=hf)
-            if len(improved) > 20:
-                print("  ... 另有 %d 条" % (len(improved) - 20), file=hf)
+            if len(appeared) > 20:
+                print("  ... 另有 %d 条" % (len(appeared) - 20), file=hf)
+        if disappeared:
+            print("\n[差异-从Ani表消失] 以下 ani baseline 在 Ani 表、current 不在了(需关注):", file=hf)
+            for x in disappeared[:20]:
+                print("  %s  (%s -> %s)" % (x["file"], x["from"], x["to"]), file=hf)
+            if len(disappeared) > 20:
+                print("  ... 另有 %d 条" % (len(disappeared) - 20), file=hf)
         if still_unknown:
             print("\n[仍失败-未归类] 需人工裁定(真坏文件 vs 复刻仍落后):", file=hf)
             for x in still_unknown[:20]:
                 print("  %s" % x["file"], file=hf)
 
-    has_regress = bool(regressed or new_fail)
-    verdict = "PASS" if not has_regress else "FAIL"
+    # 纯差异工具:差异本身不=失败;只有 new_fail(baseline 没扫到 current 却失败,异常)才 exit1
+    has_anomaly = bool(new_fail)
+    verdict = "ANOMALY(new_fail)" if has_anomaly else "OK(差异已列,好坏人工裁定)"
     print("\n结论: %s" % verdict, file=hf)
-    return 1 if has_regress else 0
+    return 1 if has_anomaly else 0
 
 
 if __name__ == "__main__":

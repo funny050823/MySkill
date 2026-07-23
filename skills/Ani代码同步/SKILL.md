@@ -69,7 +69,9 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 ### 2.2 mask 层(`ANI_FILE_MASK_*`)
 - 引擎/复刻 mask 常量:`ANI_FILE_MASK`/`ANI_FILE_MASK_EF`/`ANI_FILE_MASK_VERVION2_EF`/`ANI_FILE_MASK_VERVION3`/`ANI_FILE_MASK_VERVION2`/`ANI_FILE_MASK_COMPRESS` 等。
 - 复刻每个类型(BONE_RTS/VERTICES)的 `switch(dwMask)` 覆盖 `MASK`/`MASK_EF`/`VERVION2_EF`,`default` 读 VERSION2 结构。
-- 差异:引擎新增 mask(新版本格式)→ 复刻补 case + 对应结构,且 `GetAniMaskTypeMap()` 补该 mask+描述(见 §3 `m_dwMask` 抽取要点的三处都补)。`ANI_FILE_MASK_VERVION3`(Rust Clip)复刻特判报"新 clip 资源"并 success(同引擎,剑三未用)。
+- 差异:引擎新增 mask(新版本格式)→ 复刻补 case + 对应结构,且 `GetAniMaskTypeMap()` 补该 mask+描述(见 §3 `m_dwMask` 抽取要点的三处都补)。`ANI_FILE_MASK_VERVION3`(Rust Clip,0x4D494E41)**已对齐**:复刻用 `clip::Clip`(现成 Rust 库)解析抽 `m_dwNumBones`,不再直接退出(详见 §4 构建/VERVION3 说明)。
+</br>
+> **VERVION3(Rust clip)解析说明**:引擎 `KG3D_Animation::LoadFromFile:1548` 用 `clip::Clip`→`Import(buf,len)`→`GetBoneCount()` 抽骨骼数。复刻 `Ani.cpp` 同样用 `clip::Clip`(基类 `m_pbyBuffer` 整文件 buffer 作 Import 入参),`m_bKeyFrame` 保持 false;`BoneCnt==0`(资源异常)由解析时 `OnReadResourceFileByGBK` 报(不是 diff 判)。**构建依赖**:复刻工程链 `ClipLibX64.lib`+`KESMBaseX64.lib`(import lib,头在 `$JX3ENGINE_Sword3%\Source\Common\RUST\ClipLib` 与 `KESMBase`),运行时依赖 `ClipLibX64.dll`/`KESMBaseX64.dll`——已由 vcxproj `PostBuildEvent` 用环境变量自动拷到 `$(OutDir)`,换机器/重编译不漏。
 
 ### 2.3 结构层
 - 引擎 `_ANI_FILE_HEADER`/`_BONE_ANI`/`_BONE_ANI_EF`/`_BONE_ANI_VERSION2`/`_BONE_ANI_VERSION2_EF`/`_VERTEX_ANI`/`_VERTEX_ANI_EF`/`_VERTEX_ANI_VERSION2`/`_VERTEX_ANI_VERSION2_EF` 等。
@@ -157,23 +159,31 @@ ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
 
 ---
 
-## 6. 回归判据（闭环的"通过/终止"）
+## 6. 差异对比（闭环的"看变化"）
 
-用户已定通过判据为 **Ani 表 + 失败集双判据**(同 Pss 思路,但无音频)。每轮:改码前跑一次全量当 baseline,改+编译后跑一次当 current,对比两份 `ScanResult.db`。
+`diff_ani.py` 是**纯差异工具**:只列修改前后数据差异,**不判断差异算回归还是改善**(好坏由报告/Claude 人工裁定)。资源对错(如 VERVION3 `BoneCnt==0`)是 `Ani.cpp` 解析时 `OnReadResourceFileByGBK` 报异常的职责,不是 diff 的职责。
 
-对比脚本:
+每轮:改码前跑一次全量当 baseline,改+编译后跑一次当 current,对比两份 `ScanResult.db`:
 ```bash
 python ".claude/skills/Ani代码同步/scripts/diff_ani.py" "<baseline.db>" "<current.db>" --knownbad "<清单,可选>"
 ```
-脚本输出(同 Pss 的 diff 思路):
-- **regressed(回归)**:baseline 在 `Ani` 表(曾解析 OK)→ current 不在(现在失败),或在但 `BoneCnt`/`VertexCnt`/`dwMask` 变了。**非空 → 本轮不通过,回滚重来。** 理由:同步不该改现有 ani 的骨骼/顶点数/文件版本 mask;变了就是引入错位/漏抽。(dwMask 仅当两侧 db 都有 `dwMask` 列时比;`diff_ani.py` 自动兼容旧 db 无该列的情况,只比 BoneCnt/VertexCnt)
-- **improved(改善)**:baseline 失败 → current 进 `Ani` 表。本轮目标文件应在此。
-- **still_failing**:两次都失败(`ErrLevel=7` .ani)。与 `--knownbad` 交集 = 预期坏文件,不计回归;其余待人工裁定。
-- **new_fail**:baseline 没扫到、current 却失败(异常)。
-- exit code:0=无回归,1=有回归(regressed/new_fail 非空)。
+脚本输出(纯差异,中性):
+- **changed**:两侧都在 `Ani` 表,但 `BoneCnt`/`VertexCnt`/`dwMask` 变了(不判好坏)。如本次 VERVION3 的 BoneCnt 0→40(修复漏抽)会全列在此。
+- **appeared**:current 新进 `Ani` 表(baseline 不在:曾失败/未扫到)——如修复漏抽。
+- **disappeared**:baseline 在 `Ani` 表、current 不在了(现在失败/未扫到)——**需关注**(可能是回归)。
+- **still_failing**:两侧都失败(`ErrLevel=7` .ani)。与 `--knownbad` 交集 = 预期坏文件;其余待人工裁定。
+- **new_fail**:baseline 没扫到、current 却失败(同清单下一般不出现,出现即异常)。
+- **stable**:两侧都在 `Ani` 表且字段完全相同。
+- (dwMask 仅当两侧 db 都有 `dwMask` 列时才参与比较;旧 exe 的 db 无该列则只比 BoneCnt/VertexCnt)
+- exit code:0=正常(差异已列);1=异常(`new_fail` 非空);2=输入异常。**差异本身不导致 exit1**。
 
-**单轮通过** = `regressed` 为空 且 本轮目标文件出现在 `improved`(或该类型相关 ani 的 BoneCnt/VertexCnt 不再错)。
-**整个闭环终止** = §2 差异比对无待同步项 且 一次全量无回归 且 无 `still_failing` 之外的新失败。
+**如何裁定差异**:
+- `changed`/`appeared` 里属于**本轮目标**(如本次 VERVION3)= 预期改善,通过。
+- `changed` 里属于**不该碰的类型**(如骨骼动画 BoneCnt 莫名变了)= 回归,回滚重来。
+- `disappeared`/`new_fail` = 需关注,逐个排查。
+- 资源异常(VERVION3 `BoneCnt==0`)由 Ani.cpp 已 `OnReadResourceFileByGBK` 报出,在 `Result` 表里看,不在 diff 判。
+
+**整个闭环终止** = §2 差异比对无待同步项 且 diff 列出的差异全部裁定为"预期"(无意外 `disappeared`/`new_fail`/非目标 `changed`) 且 无 `still_failing` 之外的新失败。
 
 `known-bad` 清单:首轮 baseline 的 `still_failing` 经核实(打开文件看是否截断/损坏)后记进 `--knownbad`。
 
