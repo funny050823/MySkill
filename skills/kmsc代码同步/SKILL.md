@@ -187,6 +187,7 @@ ForDebug=0 ./KSearchResource.exe SearchAudioLabel "$JX3_HD_Client" "$REPO/x64/Re
 ```
 - `argc==4`:`argv[1]=SearchAudioLabel`,`argv[2]=client`,`argv[3]=output db`。
 - ⚠️ **前后必须不同 db 文件名**。`SoundLabel::InitDB` 先 `DeleteFileA` 再建,同路径后跑必覆盖先跑。
+- ⚠️ **跑完保留 AudioLabel_kmsc_*.db,不要删**。这是技能输出文件,留在 `x64\Release\logs\` 供查阅/复算,**禁止 rm 删除**(清理临时只清 ScanFileList 等纯中间产物,AudioLabel db 不算中间产物)。
 - `SearchAudioLabel` 是全库扫(含 pss/tani),kmsc 技能只取 `File` 表 `.kmsc` 部分。
 
 ### 5.4 读报告
