@@ -135,7 +135,7 @@ python ".claude/skills/Ani代码同步/scripts/regen_scanlist.py" \
 ```
 (ani 用独立清单 `ScanFileList_ani.txt`,避免与 Pss 的 `ScanFileList.txt` 互相覆盖。`--root "$JX3_HD_Client"` 深扫整个 client 下 .ani。)
 
-### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=0)
+### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=1)
 ```bash
 REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 # ⚠️ REPO 必须从仓库根(KResourceReader)取,勿在 x64/Release 里用 cd .. && pwd -W 取——cd .. 只退到 x64 一级,pwd -W 得到 仓库根/x64(多了一个 x64 段,即多一层),再拼 $REPO/x64/Release/logs/ScanFileList*.txt 就成了 仓库根/x64/x64/Release/logs/ScanFileList*.txt(x64 重复、文件不存在)→KResScanMgr::MainScan GetLastError(3) 扫0文件、45ms 退出。cwd 在仓库根时 pwd -W 直接对,无需 cd。
@@ -144,13 +144,13 @@ cd "$REPO/x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"
 if [ ! -f "$WCDB" ]; then WCDB="$JX3_HD_Client/.svn/wc.db"; fi
 if [ ! -f "$WCDB" ]; then echo "异常:svn wc.db 不存在,技能终止"; exit 1; fi
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 \
   ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList_ani.txt"
 ```
-- `ReadFileListFromSvnDB=0` → 走 `ScanByFileList` 精确扫清单(=1 查 svn db 改动文件,非全量)。
+- `ReadFileListFromSvnDB=1` → 走 `CopyDataFromWCDBList`:清单(ScanFileListInput)INNER JOIN svn wc.db 取清单文件的元信息(changed_revision/date/author)填 FileList,再 `ProcessMultiThreadMain` 解析——**仍扫清单全量**(不漏文件),只是 FileList 多带 svn 元信息、多~8s 查 svn db。
 - **Ani 调用路径**(与 Pss 不同):`Jx3SvnHookCheckTool.exe` → `KResChecker` 遇 `.ani` → `Jx3ResFileReaderLoader::m_pIBase->GetAniInfo` → `KBase::GetAniInfo`(`KBase.cpp`)→ `kg_ani::Ani p; p.ScanFile(pszFile)` → `Ani::ReadFile` → 抽 4 成员 → `InsertAniResult` 进 Ani 表。**不经 reader 工厂 `AddFileType`**(那 30 多注册不含 "ani")——Ani 是经 `GetAniInfo` 这条专用路径调用的。
 
 ### 5.3 读报告
@@ -294,11 +294,11 @@ python ".claude/skills/Ani代码同步/scripts/regen_scanlist.py" \
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 
-# 全量扫描(ReadFileListFromSvnDB=0 走 ScanByFileList;无音频扫描)
+# 全量扫描(ReadFileListFromSvnDB=1;清单 JOIN svn db 取元信息,仍扫清单全量;无音频扫描)
 cd "x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"; [ -f "$WCDB" ] || WCDB="$JX3_HD_Client/.svn/wc.db"
 [ -f "$WCDB" ] || { echo "异常:svn wc.db 两个候选都不存在,技能终止"; exit 1; }
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList_ani.txt"

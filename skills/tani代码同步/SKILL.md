@@ -191,7 +191,7 @@ python ".claude/skills/tani代码同步/scripts/regen_scanlist.py" \
 ```
 (tani 用独立清单 `ScanFileList_tani.txt`,避免与 Pss/Ani/kmsc 的清单互相覆盖。`--root "$JX3_HD_Client"` 深扫整个 client 下 .tani。)
 
-### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=0)
+### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=1)
 ```bash
 REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 # ⚠️ REPO 必须从仓库根(KResourceReader)取,勿在 x64/Release 里用 cd .. && pwd -W 取——cd .. 只退到 x64 一级,pwd -W 得到 仓库根/x64(多了一个 x64 段,即多一层),再拼 $REPO/x64/Release/logs/ScanFileList*.txt 就成了 仓库根/x64/x64/Release/logs/ScanFileList*.txt(x64 重复、文件不存在)→KResScanMgr::MainScan GetLastError(3) 扫0文件、45ms 退出。cwd 在仓库根时 pwd -W 直接对,无需 cd。
@@ -200,13 +200,13 @@ cd "$REPO/x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"
 if [ ! -f "$WCDB" ]; then WCDB="$JX3_HD_Client/.svn/wc.db"; fi
 if [ ! -f "$WCDB" ]; then echo "异常:svn wc.db 不存在,技能终止"; exit 1; fi
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 \
   ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList_tani.txt"
 ```
-- `ReadFileListFromSvnDB=0` → 走 `ScanByFileList` 精确扫清单(=1 查 svn db 改动文件,非全量)。
+- `ReadFileListFromSvnDB=1` → 走 `CopyDataFromWCDBList`:清单(ScanFileListInput)INNER JOIN svn wc.db 取清单文件的元信息(changed_revision/date/author)填 FileList,再 `ProcessMultiThreadMain` 解析——**仍扫清单全量**(不漏文件),只是 FileList 多带 svn 元信息、多~8s 查 svn db。
 - `bTest=1` → 测试环境,不上报。
 - 工具 `setlocale(LC_ALL, ".936")`,自己处理 GBK,中文路径 OK。
 - **tani 调用路径**:见 §1 末尾(reader 工厂 `ProcessTani` → `Tani::ReadFile`)。依赖路径经 `OnReadResourceFileByGBK` 落 `ScanResult.db` 的 `Result` 表。
@@ -380,11 +380,11 @@ python ".claude/skills/tani代码同步/scripts/regen_scanlist.py" \
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 
-# 全量扫描(ReadFileListFromSvnDB=0 走 ScanByFileList)
+# 全量扫描(ReadFileListFromSvnDB=1;清单 JOIN svn db 取元信息,仍扫清单全量)
 cd "x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"; [ -f "$WCDB" ] || WCDB="$JX3_HD_Client/.svn/wc.db"
 [ -f "$WCDB" ] || { echo "异常:svn wc.db 两个候选都不存在,技能终止"; exit 1; }  # 上级/本级 .svn 必须存在一个(§1 前置已查,此为兜底)
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList_tani.txt"

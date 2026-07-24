@@ -190,8 +190,8 @@ python ".claude/skills/Pss代码同步/scripts/regen_scanlist.py" \
 ```
 脚本遍历 `--root` 收集 `*.pss`,按 GBK+CRLF 写出。传 `--subset <目录或清单文件>` 只跑子集。
 
-### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=0)
-现有 `x64\Release\logs\Jx3LocalResScanTool.cmd` 里 `ReadFileListFromSvnDB=1` 会去 svn db 读**改动文件**,不是全量。全量要置 `0`,让工具走 `ScanByFileList(ScanFileList.txt)` 精确扫清单里的文件。`.cmd` 是 GBK,别用 Edit/Write 改它——直接带环境变量调 exe:
+### 5.2 跑扫描器(关键:ReadFileListFromSvnDB=1)
+现有 `x64\Release\logs\Jx3LocalResScanTool.cmd` 里 `ReadFileListFromSvnDB=1` 是全量清单扫描(清单 INNER JOIN svn wc.db 取清单文件的 changed_revision/date/author 元信息填 FileList,再解析——**仍扫清单全量,不漏文件**)。直接带环境变量调 exe(=1):
 ```bash
 REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 # ⚠️ REPO 必须从仓库根(KResourceReader)取,勿在 x64/Release 里用 cd .. && pwd -W 取——cd .. 只退到 x64 一级,pwd -W 得到 仓库根/x64(多了一个 x64 段,即多一层),再拼 $REPO/x64/Release/logs/ScanFileList*.txt 就成了 仓库根/x64/x64/Release/logs/ScanFileList*.txt(x64 重复、文件不存在)→KResScanMgr::MainScan GetLastError(3) 扫0文件、45ms 退出。cwd 在仓库根时 pwd -W 直接对,无需 cd。
@@ -200,14 +200,14 @@ cd "$REPO/x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"
 if [ ! -f "$WCDB" ]; then WCDB="$JX3_HD_Client/.svn/wc.db"; fi
 if [ ! -f "$WCDB" ]; then echo "异常:svn wc.db 不存在(\$JX3_HD_Client/../.svn/wc.db 和 \$JX3_HD_Client/.svn/wc.db 都没有),技能终止"; exit 1; fi
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 \
   ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList.txt"
 ```
 - `bTest=1` → 测试环境,不上报。
-- 第 4 个参数(`argc==4`)走 `MainScan(ClientPath, DBFile, ScanList, bReadFileListFromSvnDB)`;`ReadFileListFromSvnDB=0` + ScanList 是文件 → `ScanByFileList`,精确扫清单。
+- 第 4 个参数(`argc==4`)走 `MainScan(ClientPath, DBFile, ScanList, bReadFileListFromSvnDB)`;`ReadFileListFromSvnDB=1` + ScanList 是文件 → `CopyDataFromWCDBList`(清单 INNER JOIN svn wc.db 取元信息)+ `ProcessMultiThreadMain` 解析,**扫清单全量**(实测与 =0 扫到的文件数一致,只是 FileList 多带 svn 元信息、多~8s 查 svn db)。
 - 工具 `setlocale(LC_ALL, ".936")`,自己处理 GBK,中文路径 OK。
 
 ### 5.3 读报告
@@ -372,11 +372,11 @@ python ".claude/skills/Pss代码同步/scripts/regen_scanlist.py" \
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 
-# 全量扫描(ReadFileListFromSvnDB=0 走 ScanByFileList)
+# 全量扫描(ReadFileListFromSvnDB=1;清单 JOIN svn db 取元信息,仍扫清单全量)
 cd "x64/Release"
 WCDB="$JX3_HD_Client/../.svn/wc.db"; [ -f "$WCDB" ] || WCDB="$JX3_HD_Client/.svn/wc.db"
 [ -f "$WCDB" ] || { echo "异常:svn wc.db 两个候选都不存在,技能终止"; exit 1; }  # 上级/本级 .svn 必须存在一个(§1 前置已查,此为兜底)
-ReadFileListFromSvnDB=0 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
+ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 ./Jx3SvnHookCheckTool.exe \
   "$JX3_HD_Client" \
   "$WCDB" \
   "$REPO/x64/Release/logs/ScanFileList.txt"
