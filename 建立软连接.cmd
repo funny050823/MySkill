@@ -8,6 +8,7 @@ call :MakePathLink krl代码同步
 call :MakePathLink tani代码同步
 call :MakePathLink Pss代码同步
 call :MakePathLink SRScene代码同步
+call :MakePathLink State代码同步
 pause
 goto :eof
 
@@ -19,6 +20,7 @@ goto :eof
     )
     
     if not exist "%desPath%\%1" (
+        echo link %1
         mklink /d /j "%desPath%\%1" "%cd%\skills\%1"
     )
     goto :eof
