@@ -160,6 +160,12 @@ description: 把 Tani 复刻解析器(Tani::ReadFile)与引擎原函数(KG3D_Ani
 
 编译整个解决方案产出扫描器(`Jx3SvnHookCheckTool.exe` 在 `x64\Release\`):
 - `Tani.cpp` 在 `Jx3ResFileReaderAPI.vcxproj`。
+- **前置:先编译 RUST 依赖工程(同 Pss §4,稳妥起见)**:`Jx3ResFileReaderAPI.vcxproj` link 依赖 `ClipLibX64.lib`/`KESMBaseX64.lib`(import lib),但 `FileParse.sln` 不含这两个工程、不会自动先编。lib 缺失/过期/换机器未编 → 链接 LNK1104。每轮先编:
+  ```bash
+  # bash 下 / 写成 //;dos/cmd 写 /p:
+  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+  ```
 - MSBuild:用 `%MSBuildTool%`(见 §1)。命令(在仓库根,用相对 `FileParse.sln`):
   ```bash
   "$MSBuildTool" FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
@@ -167,7 +173,7 @@ description: 把 Tani 复刻解析器(Tani::ReadFile)与引擎原函数(KG3D_Ani
   - bash 下 MSBuild 的 `/` 参数写成 `//`(防 bash 当成路径)。
 - **不要用 `Build.cmd`**(带 svn up/git 推送/PE 核验副作用)。本闭环只要 `FileParse.sln` rebuild 出新 exe。
 - 判定:退出码 0 且 `x64\Release\Jx3SvnHookCheckTool.exe` 更新时间刷新即成功。编译失败 → 看 MSBuild stdout 先修编译错。
-- ⚠️ 编译遇 LNK1104 打不开 dll/exe → 多半有遗留 `Jx3*` 工具进程锁着,`tasklist | grep Jx3` 查、`taskkill //PID //F` 结束后重试。
+- ⚠️ 编译遇 LNK1104 打不开 dll/exe → 多半有遗留 `Jx3*` 工具进程锁着,`tasklist | grep Jx3` 查、`taskkill //PID //F` 结束后重试(也可能是 RUST lib 没编,见上"前置")。
 
 ---
 
@@ -279,7 +285,7 @@ B. 比对:  按 §2 三层(标签类型/per‑type 版本分支/结构)比对复
            先核实是否真序列化进 .tani;区分"字节布局分支"与"运行时默认分支")
 C. 改码:  改 Tani.cpp/HeaderTani.h/Tani.h(UTF-8,Edit/Write 安全)同步该标签/版本/结构;
           同步时逐条核 §3 两类信息(路径/音频)是否补齐;每段 SkipData 总字节数要对齐引擎
-D. 编译:  §4 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C(LNK1104查遗留进程)
+D. 编译:  §4 先编 RUST 依赖(KESMBase/ClipLib,§4 前置)→ 再 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C(LNK1104查遗留进程或RUST lib没编)
 E. 测试:  用 baseline 同一份清单 → 跑扫描器得 current ScanResult.db
           + 跑 SearchAudioLabel 得 current AudioLabel.db(不同文件名!)
 F. 判据:  diff_tani.py baseline vs current --audiolabel baseline_audio current_audio
@@ -368,7 +374,9 @@ python ".claude/skills/tani代码同步/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client" --ext tani \
   --out   "x64/Release/logs/ScanFileList_tani.txt"
 
-# 编译
+# 编译(先编 RUST 依赖 KESMBase/ClipLib,再编 FileParse.sln;FileParse.sln 不含这两个工程)
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 

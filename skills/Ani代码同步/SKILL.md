@@ -104,6 +104,12 @@ Ani 只抽 **5 个成员**(不是 Pss 的三类,无音频、无明文路径):
 ## 4. 构建（同 Pss）
 
 编译整个解决方案产出扫描器(`Jx3SvnHookCheckTool.exe` 在 `x64\Release\`):
+- **前置:先编译 RUST 依赖工程(同 Pss §4,稳妥起见;对 Ani 尤其重要)**:`Jx3ResFileReaderAPI.vcxproj` link 依赖 `ClipLibX64.lib`/`KESMBaseX64.lib`(import lib),但 `FileParse.sln` 不含这两个工程、不会自动先编。Ani 的 VERVION3(Rust clip)解析直接用 `clip::Clip`(来自 ClipLib),lib 缺失/过期/换机器未编 → 链接 LNK1104 / 运行时 dll 加载失败。每轮先编:
+  ```bash
+  # bash 下 / 写成 //;dos/cmd 写 /p:
+  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+  ```
 - MSBuild:用 `%MSBuildTool%`(见 §1)。命令(在仓库根,用相对 `FileParse.sln`):
   ```bash
   "$MSBuildTool" FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
@@ -200,7 +206,7 @@ B. 比对:  按 §2 三层(类型/mask/结构)比对复刻↔引擎,列当轮待
           (注意 BINDPOSE_UPDATE 等先核实是否真序列化进 .ani,像 Pss 的 UIBOUND)
 C. 改码:  改 Ani.cpp/Ani.h(UTF-8,Edit/Write 安全)同步该类型/mask/结构;
           同步时核 §3 五成员是否仍正确抽取
-D. 编译:  §4 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C
+D. 编译:  §4 先编 RUST 依赖(KESMBase/ClipLib,§4 前置,Ani 的 VERVION3 依赖 ClipLib)→ 再 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C
 E. 测试:  用 baseline 同一份清单 → 跑扫描器 → current ScanResult.db
 F. 判据:  diff_ani.py baseline vs current
           - regressed 非空 → 回滚本轮改动,回到 B
@@ -282,7 +288,9 @@ python ".claude/skills/Ani代码同步/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client" --ext ani \
   --out   "x64/Release/logs/ScanFileList_ani.txt"
 
-# 编译
+# 编译(先编 RUST 依赖 KESMBase/ClipLib,再编 FileParse.sln;FileParse.sln 不含这两个工程)
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 

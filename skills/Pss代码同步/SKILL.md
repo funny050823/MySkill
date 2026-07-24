@@ -154,6 +154,17 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 
 编译整个解决方案产出扫描器(测试要用的 `Jx3SvnHookCheckTool.exe` 在 `x64\Release\`):
 - MSBuild:用环境变量 `%MSBuildTool%`(本机 = `C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe`),见 §1 前置环境检查。
+
+> **前置:先编译 RUST 依赖工程(稳妥起见)**。`Jx3ResFileReaderAPI.vcxproj` link 依赖 `ClipLibX64.lib`/`KESMBaseX64.lib`(import lib,头从 `$(JX3ENGINE_Sword3)\Source\Common\RUST\{ClipLib,KESMBase}` 取),由两个 RUST 工程各自编译产出。⚠️ `FileParse.sln` **不包含**这两个工程(也无 `ProjectReference`),故 `FileParse.sln` rebuild **不会自动先编它们**——若 `$(JX3ENGINE_Sword3)\Source\Common\RUST\Lib\` 下的 `*.lib`/`*.dll` 缺失/过期/换机器未编,链接 `Jx3ResFileReaderAPI` 会 LNK1104 打不开 lib。稳妥起见每轮先编这两个(已编过且 lib 在则秒过):
+> ```bash
+> # bash 下 MSBuild 的 / 参数写成 // (防 bash 当成路径)。dos/cmd 下写 /p: 即可。
+> "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+> "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+> ```
+> - 两个工程都是 `ConfigurationType=DynamicLibrary`,有 `Release|x64` 配置,出 `KESMBaseX64.lib`/`ClipLibX64.lib`(+ dll)到 `...\RUST\Lib\`。
+> - 编译这两个失败 → 先修(看 MSBuild stdout);没编过它们别直接编 `FileParse.sln`。
+> - dos/cmd 等价(你给的批处理原样):`call "%MSBuildTool%" "%JX3ENGINE_Sword3%\Source\Common\RUST\KESMBase\KESMBase_2019.vcxproj" /p:Configuration=Release /p:Platform=x64` 与 `...\ClipLib\ClipLib_2019.vcxproj ...`。
+
 - 命令(在仓库根 `项目路径` 执行;Claude 执行技能时 cwd 本就在仓库根,用相对的 `FileParse.sln` 即可):
   ```bash
   "$MSBuildTool" FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
@@ -268,7 +279,7 @@ A. 基线:  regen_scanlist.py 生成全量清单 → 跑扫描器(§5.2)得 base
 B. 比对:  按 §2 五层比对复刻↔引擎,列出当轮要同步的项(优先级:解析失败相关的类型 > 版本分支错位 > 结构体错位 > 其余)
 C. 改码:  改 Pss.cpp/HeaderPss.h/Pss.h(UTF-8,Edit/Write 安全)同步该类型;
           同步时逐条核 §3 三类信息是否补齐
-D. 编译:  §4 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C(不要带错测试)
+D. 编译:  §4 先编 RUST 依赖(KESMBase/ClipLib,§4 前置)→ 再 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C(不要带错测试)
 E. 测试:  不重生清单(用 baseline 同一份)→ 跑扫描器得 current ScanResult.db
           + 跑 SearchAudioLabel 得 current AudioLabel.db(不同文件名!)
 F. 判据:  diff_scanresult.py baseline vs current --audiolabel baseline_audio current_audio
@@ -355,7 +366,9 @@ python ".claude/skills/Pss代码同步/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client/data/source/other" \
   --out   "x64/Release/logs/ScanFileList.txt"
 
-# 编译
+# 编译(先编 RUST 依赖 KESMBase/ClipLib,再编 FileParse.sln;FileParse.sln 不含这两个工程)
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
 "$MSBuildTool" \
   FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
 
