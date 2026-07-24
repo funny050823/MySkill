@@ -64,7 +64,11 @@ description: 把 Kmsc 复刻解析器(Kmsc::ReadFile)与引擎原函数(KPlotLoa
 
 ## 2. 差异比对法（每轮第一步）
 
-引擎 `LoadPlotData` 顺序读:FileHeader → FrameRate → 版本分支路径(>=7 FocusActor、>=6/5/4/3 各 MAX_PATH)→ 对象段(`nSaveObjectNum` × [dwType+KTrans+对象])→ 动作段(`nActionNum` × [前置index+type+elementID+动作])→ 相对段(version>=2)。复刻 `ReadFile` 已与之一一对齐(顶层版本分支已核验)。差异重点在 **per‑type 的对象/动作 switch 是否缺 case**。
+引擎 `LoadPlotData` 顺序读:FileHeader → FrameRate → 版本分支路径(>=7 FocusActor、>=6/5/4/3 各 MAX_PATH)→ 对象段(`nSaveObjectNum` × [dwType+KTrans+对象])→ 动作段(`nActionNum` × [前置index+type+elementID+动作])→ 相对段(version>=2)。复刻 `ReadFile` 已与之一一对齐(顶层版本分支已核验)。
+
+⚠️ **差异重点有两个,缺一不可**:
+1. **per‑type 的对象/动作 switch 是否缺 case**(§2.2/§2.3)——新增类型。
+2. **版本分支层**(§2.5)——**遍布解析全程,是更普遍的落后来源**:代码里有大量版本标识数字(顶层 `dwVersion`、各对象/动作自己的 `pdwVersion`、`dwMask`),**新版本号恒大于老版本号,引擎新版本会在 `>= N` 分支里加新字段/新读取**。复刻没跟到新版本号就错位/漏抽。这不只 NewAction 一种,而是**每个对象/动作的 LoadFromFile 内部都有版本分支**,需系统比对。
 
 ### 2.1 枚举层(先确认来源)
 - 确认 `KmscHeader.h` 的 `#include "..\..\JX3Interface\Include\KG3DMovie\IKMovieTypeDef.h"` 实际解析到引擎头(编译能过即解析得到)。若解析到引擎头 → `EnumObjectType`/`EnumActionType` 枚举值与引擎自动同步,**枚举层无落后风险**。
@@ -83,12 +87,21 @@ description: 把 Kmsc 复刻解析器(Kmsc::ReadFile)与引擎原函数(KPlotLoa
 - 逐类型核实是否真被序列化(`EAT_FKBoneAni`/`EAT_IKBoneAni` 引擎侧也 `_ASSERTE(0)`,不序列化,不必同步)。
 - 对每个确认要同步的动作:去引擎找对应 `KMovieActionXxx::LoadFromFile`,**按字节顺序**把读取序列搬进复刻 `KMovieObject.cpp` 的 `kg_read_action::KMovieActionXxx::LoadFromFile`,套用复刻现有动作风格。
 
+> **关于 `NewAction` 超范围/缺 case 的 `default` 行为(无需改)**:复刻 `default` 是 `KG_PROCESS_ERROR(FALSE)` **硬失败**(在 `NewAction` 内部直接失败);引擎 `KActionFactory::CreateMovieAction` 对未知类型**返回 null**,由调用方 `KG_PROCESS_ERROR(pMovieAction)` 失败(`KMovieActionGroup.cpp:109/324`、`KPlotLoader::ReadActionDataFromFile`)。两者最终结果一致——含未知动作类型的 kmsc **都解析失败**,只是复刻失败点早一步(在 NewAction 内)、引擎晚一步(在调用方)。资源检查角度行为一致,**复刻处理合理,无需改成"返回 null"**。这个硬失败反而是好事:引擎将来新增动作类型时,含它的 kmsc 会**立即解析失败暴露**(而非静默漏抽),闭环到时按本节补 case 即可。
+
 ### 2.4 结构体层
 - 引擎 `KMovieScene::FileHeader`、`KTrans`(vTrans+vScaling+vRotation = 12+12+16=40)、各对象/动作 `FileHeader` 与 body 结构。
 - 复刻 `KmscHeader.h` 的对应结构。
 - 差异:引擎结构新增字段/改大小(常带版本分支 `dwVersion >= N` 加读取)→ 复刻结构体与版本分支都要同步,**否则后续字段错位**。用 `KMovieScene.cpp` 的 `SaveToFile` 系列反推 writer 字节数,与复刻 reader 逐一核对。
 
-> 实操:grep 各取两侧 `MOT_*`/`EAT_*` 做集合差,再人工逐项按 2.2/2.3/2.4 核实。结论写进当轮记录。
+### 2.5 版本分支层(遍布全程,重点) — **普遍的落后来源**
+解析全程有大量版本标识数字,**新版本号恒大于老版本号,引擎新版本在 `>= N` / `> N` 分支里加新字段/新读取**,复刻没跟就错位/漏抽。比 case 缺失更普遍——不只 NewAction,每个对象/动作的 `LoadFromFile` 内部都有:
+- **顶层 `dwVersion`**:`Kmsc.cpp` 顶层 `if (dwVersion >= 7/6/5/4/3/2)` 一串(每升一版加一段)。复刻特判 `>=8 报错"工具只支持到7"`——说明工具认到 7,引擎若已到 8+ 则需补 `>=8` 分支。
+- **per‑type `pdwVersion`**:`KMovieObject.cpp` 各对象/动作自己的版本号,如 `KMovieActor::LoadFromFileEx` 内 `if (*pdwVersion > 0x01/>0x02/>0x03/>=0x05/>=0x06/>=0x07/>=0x08)` 一堆分支——每个类型独立版本,新版本加字段。引擎某类型从 0x07 升 0x08 加了字段,复刻没跟则该类型解析错位。
+- **`dwMask`** (ani 亦同模式):文件格式版本。
+- **比对法**:对每个 per‑type `LoadFromFile`,逐个核两侧的版本分支上限是否一致(引擎最高 `>= N`、复刻最高 `>= M`,若 `N > M` 则复刻缺新版本分支 → 同步:补 `>= M+1...N` 分支 + 对应新字段读取,对齐引擎 `SaveToFile` 该版本写入的字节)。grep `dwVersion|pdwVersion|>= 0x|> 0x` 各取两侧分支上限做对比。
+
+> 实操:grep 各取两侧 `MOT_*`/`EAT_*` 做 case 集合差(§2.2/§2.3),grep `dwVersion|pdwVersion|>= 0x|> 0x` 比版本分支上限(§2.5),再人工逐项按 2.2/2.3/2.4/2.5 核实。结论写进当轮记录(改了哪个类型/补了哪个版本分支/对应引擎文件:行)。
 
 ---
 
@@ -223,8 +236,8 @@ python ".claude/skills/kmsc代码同步/scripts/diff_kmsc.py" "<baseline ScanRes
 0. 前置:  按 §1 前置环境检查(6 项),任一缺失 → 报错终止
 A. 基线:  regen_scanlist.py 生成全量 kmsc 清单 → 跑扫描器(§5.2)得 baseline ScanResult.db
           + 跑 SearchAudioLabel(§5.3)得 baseline AudioLabel.db → 存两者路径
-B. 比对:  按 §2 四层(枚举/对象类型/动作类型/结构)比对复刻↔引擎,列当轮待同步项
-          (重点 NewAction switch 缺 case;先核实是否真序列化进 .kmsc)
+B. 比对:  按 §2 五层(枚举/对象类型/动作类型/结构/版本分支)比对复刻↔引擎,列当轮待同步项
+          (重点:NewAction switch 缺 case(§2.3) + 版本分支上限(§2.5,遍布全程);先核实是否真序列化进 .kmsc)
 C. 改码:  改 Kmsc.cpp/KMovieObject.cpp/KmscHeader.h(UTF-8,Edit/Write 安全);
           同步时逐条核 §3 两类信息(路径/音频)是否补齐
 D. 编译:  §4 MSBuild rebuild FileParse.sln;编译失败 → 修编译错回到 C(LNK1104查遗留进程)
@@ -288,10 +301,17 @@ python ".claude/skills/kmsc代码同步/scripts/gen_report_kmsc.py" \
 
 ## 一、本次代码改动            ← Claude 写
 ## 二、前后对比结果             ← gen_report_kmsc.py 脚本片段(Scan.log + ScanResult + AudioLabel)
-## 三、不同原因分析             ← Claude 写
+## 三、不同原因分析             ← Claude 写(重点:详细说明每个差异的来源)
 ## 四、终止结论                 ← Claude 写
 ```
 - 报告 UTF‑8(用 Write/Edit),**不是 GBK**。
+
+**⚠️ "三、不同原因分析"必须详细说明差异来源**(不只列数字):
+- 对每个有差异的表/字段,**说清差异从哪来**——是本次代码改动导致的(如"修复 NewAction 漏抽,使 X 个 kmsc 的依赖从 0 变 N")、还是数据本身变动(如 svn 新增了 kmsc)、还是工具行为差异。
+- 把差异和"一、本次代码改动"对应起来:哪条改动产生了哪条差异、为什么。
+- 对 `changed`/`appeared`/`disappeared` 各类,逐类说明来源(如"`appeared` 的 N 个 kmsc = 修复了 EAT_Xxx 漏抽后,这些含该动作的 kmsc 从解析失败变成功")。
+- 若某差异与本次改动**无关**(意外),单独标出并说明可能原因(这才是需回滚/排查的)。
+- 即:**报告要让读者看懂"为什么会有这些差异",而不只是"有 N 条差异"**。脚本只给数字和样本,来源说明靠 Claude 据本次改动 + 回归分析补写。
 
 ---
 
