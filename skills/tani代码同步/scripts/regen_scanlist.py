@@ -12,7 +12,7 @@ regen_scanlist.py — 为 Jx3SvnHookCheckTool.exe 生成扫描清单 ScanFileLis
   python regen_scanlist.py [--root DIR] [--out FILE] [--ext pss] [--subset PATH] [--dry-run]
 
 默认:
-  --root  D:/JX3/trunk/sword3-products/trunk/client/data/source/other
+  --root  $JX3_HD_Client/data/source/other(env 必须设,未设则须显式传 --root)
   --out   <repo>/x64/Release/logs/ScanFileList.txt
   --ext   pss
   --subset  可选:传一个目录(只在该目录下收集)或一个清单文件(每行一个路径,原样去重)。
@@ -33,6 +33,11 @@ import sys
 #  实际调用总带显式 --out "$REPO/...",故此默认值不被使用,不影响。)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "..", ".."))
+
+# 默认扫描根: 取自环境变量 JX3_HD_Client(§1 前置要求其必须存在、缺则报错终止——不硬编码兜底)。
+# 各技能 SKILL.md §5.1 均显式传 --root,此默认值仅 ad-hoc/省略参数时用;env 未设且未传 --root 则报错。
+_CLIENT = os.environ.get("JX3_HD_Client")
+_DEFAULT_ROOT = os.path.join(_CLIENT, "data", "source", "other") if _CLIENT else None
 
 
 def collect_from_dir(root, ext):
@@ -72,8 +77,8 @@ def collect_from_list_file(path):
 
 def main():
     ap = argparse.ArgumentParser(description="生成 GBK 扫描清单 ScanFileList.txt")
-    ap.add_argument("--root", default=r"D:\JX3\trunk\sword3-products\trunk\client\data\source\other",
-                    help="收集 *.ext 的根目录(默认 other/)")
+    ap.add_argument("--root", default=_DEFAULT_ROOT,
+                    help="收集 *.ext 的根目录(默认 $JX3_HD_Client/data/source/other;env 未设须显式传 --root)")
     ap.add_argument("--out", default=os.path.join(REPO_ROOT, "x64", "Release", "logs", "ScanFileList.txt"),
                     help="输出清单文件路径")
     ap.add_argument("--ext", default="pss", help="扩展名(默认 pss;tani 用 tani)")
@@ -93,6 +98,9 @@ def main():
             print("错误:--subset 既不是目录也不是文件:%s" % args.subset, file=sys.stderr)
             return 1
     else:
+        if not args.root:
+            print("错误:未设环境变量 JX3_HD_Client 且未传 --root(§1 前置要求 JX3_HD_Client 必须存在),技能终止", file=sys.stderr)
+            return 2
         if not os.path.isdir(args.root):
             print("错误:--root 不是目录:%s" % args.root, file=sys.stderr)
             return 1
