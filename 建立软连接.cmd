@@ -7,6 +7,7 @@ call :MakePathLink kmsc代码同步
 call :MakePathLink krl代码同步
 call :MakePathLink tani代码同步
 call :MakePathLink Pss代码同步
+call :MakePathLink SRScene代码同步
 pause
 goto :eof
 
