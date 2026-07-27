@@ -34,7 +34,12 @@ description: 把 KRL 复刻解析器(KRL::ReadFile)与引擎原函数(KGRLLoader
 > | `JX3_HD_Client` | **必** | client 测试数据根(全量扫描输入),指向 client 数据根目录(sword3-products 下的 client 副本),内容以 GB 计、不会为空 | 全量扫描无数据 |
 > | `MSBuildTool` | **必** | MSBuild.exe 路径(编译 `FileParse.sln`),指向 `...\2019\...\Bin\MSBuild.exe` | 编译失败 |
 > | svn `wc.db` | **必** | `$JX3_HD_Client/../.svn/wc.db` 或 `$JX3_HD_Client/.svn/wc.db` 之一(exe 要求 `PathFileExistsA(pszDBFile)` 真) | 扫描器报"参数错误" |
-> - 检查命令(bash,同 Pss):`for v in JX3ENGINE_Sword3 JX3ENGINE_BASE JX3ENGINE_DevEnv JX3_HD_Client; do [ -d "${!v}" ] && echo "$v OK=${!v}" || echo "$v 缺失/无效,技能终止"; done; [ -f "$MSBuildTool" ] && echo "MSBuildTool OK=$MSBuildTool" || echo "MSBuildTool 缺失/无效,技能终止"; WCDB="$JX3_HD_Client/../.svn/wc.db"; [ -f "$WCDB" ] || WCDB="$JX3_HD_Client/.svn/wc.db"; [ -f "$WCDB" ] && echo "wc.db OK=$WCDB" || echo "wc.db 异常,技能终止"`
+> - 检查命令(bash,调用通用脚本 `_common/scripts/check_env.sh`,7 技能共用,维护 1 份):
+>   ```bash
+>   REPO="$(pwd -W)"  # 仓库根
+>   bash "$REPO/.claude/skills/_common/scripts/check_env.sh" || exit 1
+>   ```
+>   - 6 项任一缺失/无效 → 脚本打印"缺失/无效,技能终止"并 exit 1;全 OK exit 0,并 stdout 打印 `WCDB=<wc.db 路径>` 供后续复用。
 > - 任一**必需**项缺失 → 报错并停止。
 
 > **项目路径(仓库根)**(同 Pss):`KResourceReader` 仓库根 = 本 SKILL.md 上溯 4 级 = Claude 执行技能时的工作目录(Primary working directory)。说明路径写作 `项目路径\...`;bash 命令块用 `REPO="$(pwd -W)"`(Windows 绝对,exe 能接受),块内 `$REPO/...`;传 exe 的文件路径必须绝对(exe 内部 `SetCurrentDirectoryA` 到 client,相对路径失效)。Claude 执行技能 cwd 本就在仓库根,`pwd -W` 直接对。
@@ -145,25 +150,20 @@ description: 把 KRL 复刻解析器(KRL::ReadFile)与引擎原函数(KGRLLoader
 
 ---
 
-## 4. 构建（同 Pss）
+## 4. 构建（调用通用脚本 `_common/scripts/build.sh`,7 技能共用,维护 1 份）
 
 编译整个解决方案产出扫描器(`Jx3SvnHookCheckTool.exe` 在 `x64\Release\`):
 - `KRL.cpp` 在 `Jx3ResFileReaderAPI.vcxproj`。
-- **前置:先编译 RUST 依赖工程(同 Pss §4,稳妥起见)**:`Jx3ResFileReaderAPI.vcxproj` link 依赖 `ClipLibX64.lib`/`KESMBaseX64.lib`(import lib),但 `FileParse.sln` 不含这两个工程、不会自动先编。lib 缺失/过期/换机器未编 → 链接 LNK1104。每轮先编:
+- 命令(在仓库根,先跑过 §1 check_env):
   ```bash
-  # bash 下 / 写成 //;dos/cmd 写 /p:
-  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-  "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
+  REPO="$(pwd -W)"  # 仓库根
+  bash "$REPO/.claude/skills/_common/scripts/build.sh" || exit 1
   ```
-- MSBuild:用 `%MSBuildTool%`(见 §1)。命令(在仓库根,用相对 `FileParse.sln`):
-  ```bash
-  "$MSBuildTool" FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
-  ```
-  - bash 下 MSBuild 的 `/` 参数写成 `//`(防 bash 当成路径)。
+  - 脚本先编 RUST 依赖(KESMBase/ClipLib,`FileParse.sln` 不含这两个工程不会自动先编),再 rebuild `FileParse.sln`。设 `BUILD_SKIP_RUST=1` 可跳过 RUST 前置。
+  - RUST lib 缺 → LNK1104 / 扫描时 `Jx3ResFileReaderAPI.dll` 加载 `GetLastError(126)`(dll 没拷到 OutDir)。
 - **不要用 `Build.cmd`**(带 svn up/git 推送/PE 核验副作用)。本闭环只要 `FileParse.sln` rebuild 出新 exe。
 - 判定:退出码 0 且 `x64\Release\Jx3SvnHookCheckTool.exe` 更新时间刷新即成功。编译失败 → 看 MSBuild stdout 先修编译错。
-- ⚠️ 编译遇 LNK1104 打不开 dll/exe → 多半有遗留 `Jx3*` 工具进程锁着,`tasklist | grep Jx3` 查、`taskkill //PID //F` 结束后重试(也可能是 RUST lib 没编,见上"前置")。
-
+- ⚠️ 编译遇 LNK1104 打不开 dll/exe → 多半有遗留 `Jx3*` 工具进程锁着,`tasklist | grep Jx3` 查、`taskkill //PID //F` 结束后重试(也可能是 RUST lib 没编,`build.sh` 已含 RUST 前置)。
 ---
 
 ## 5. 测试（全量）
@@ -175,7 +175,7 @@ description: 把 KRL 复刻解析器(KRL::ReadFile)与引擎原函数(KGRLLoader
 ```bash
 REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 # ⚠️ REPO 必须从仓库根(KResourceReader)取,勿在 x64/Release 里用 cd .. && pwd -W 取——cd .. 只退到 x64 一级,pwd -W 得到 仓库根/x64(多了一个 x64 段,即多一层),再拼 $REPO/x64/Release/logs/ScanFileList*.txt 就成了 仓库根/x64/x64/Release/logs/ScanFileList*.txt(x64 重复、文件不存在)→KResScanMgr::MainScan GetLastError(3) 扫0文件、45ms 退出。cwd 在仓库根时 pwd -W 直接对,无需 cd。
-python "$REPO/.claude/skills/krl代码同步/scripts/regen_scanlist.py" \
+python "$REPO/.claude/skills/_common/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client/represent/rl" --ext krl \
   --out   "$REPO/x64/Release/logs/ScanFileList_krl.txt"
 ```
@@ -341,15 +341,12 @@ REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 cd "$REPO"
 
 # 生成全量 GBK krl 清单(深扫 represent/rl 下 .krl)
-python "$REPO/.claude/skills/krl代码同步/scripts/regen_scanlist.py" \
+python "$REPO/.claude/skills/_common/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client/represent/rl" --ext krl \
   --out   "x64/Release/logs/ScanFileList_krl.txt"
 
-# 编译(先编 RUST 依赖 KESMBase/ClipLib,再编 FileParse.sln;FileParse.sln 不含这两个工程)
-"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-"$MSBuildTool" \
-  FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
+# 编译(调用通用脚本 _common/scripts/build.sh,7 技能共用;先编 RUST 依赖再编 FileParse.sln)
+bash "$REPO/.claude/skills/_common/scripts/build.sh" || exit 1
 
 # 全量扫描(ReadFileListFromSvnDB=1;清单 JOIN svn db 取元信息,仍扫清单全量;无音频扫描)
 cd "x64/Release"

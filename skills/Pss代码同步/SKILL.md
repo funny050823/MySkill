@@ -26,7 +26,13 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 > | `JX3_HD_Client` | **必** | client 测试数据根(全量扫描/音频扫描输入),指向 client 数据根目录(sword3-products 下的 client 副本),内容以 GB 计、不会为空 | 全量扫描无数据 |
 > | `MSBuildTool` | **必** | MSBuild.exe 路径(编译 `FileParse.sln`),指向 `...\2019\...\Bin\MSBuild.exe` | 编译失败 |
 > | svn `wc.db` | **必** | `$JX3_HD_Client/../.svn/wc.db` 或 `$JX3_HD_Client/.svn/wc.db` 之一(client 上级是 svn 副本根→前者;client 自身是副本根→后者),exe 要求 `PathFileExistsA(pszDBFile)` 真 | 扫描器报"参数错误" |
-> - 检查命令(bash):`for v in JX3ENGINE_Sword3 JX3ENGINE_BASE JX3ENGINE_DevEnv JX3_HD_Client; do [ -d "${!v}" ] && echo "$v OK=${!v}" || echo "$v 缺失/无效,技能终止"; done; [ -f "$MSBuildTool" ] && echo "MSBuildTool OK=$MSBuildTool" || echo "MSBuildTool 缺失/无效,技能终止"; WCDB="$JX3_HD_Client/../.svn/wc.db"; [ -f "$WCDB" ] || WCDB="$JX3_HD_Client/.svn/wc.db"; [ -f "$WCDB" ] && echo "wc.db OK=$WCDB" || echo "wc.db 异常:\$JX3_HD_Client/../.svn/wc.db 和 \$JX3_HD_Client/.svn/wc.db 都不存在,技能终止"`(`JX3_HD_Client` 即 client 测试数据目录,查它存在即可,无需另查 client 路径;`MSBuildTool` 是 exe 文件用 `[ -f ]` 查;`wc.db` 上级/本级 .svn 必须存在一个)
+> - 检查命令(bash,调用通用脚本 `_common/scripts/check_env.sh`,7 技能共用,维护 1 份):
+>   ```bash
+>   REPO="$(pwd -W)"  # 仓库根
+>   bash "$REPO/.claude/skills/_common/scripts/check_env.sh" || exit 1
+>   ```
+>   - 6 项(4 环境变量+MSBuildTool+svn wc.db)任一缺失/无效 → 脚本打印"缺失/无效,技能终止"并 exit 1;全 OK exit 0,并 stdout 打印 `WCDB=<wc.db 路径>` 供后续复用。`JX3_HD_Client` 即 client 测试数据目录;`MSBuildTool` 是 exe 用 `[ -f ]` 查;`wc.db` 上级/本级 .svn 必须存在一个。
+>   - 脚本内容见 `_common/scripts/check_env.sh`(经软链 `.claude/skills/_common` → MySkill)。
 > - 任一**必需**项缺失 → 报错并停止,不要继续到后面才发现编译/对标失败。
 
 > **项目路径(仓库根)**:`KResourceReader` 仓库根 = 本 SKILL.md 上溯 4 级 = Claude 执行技能时的工作目录(Primary working directory)。下文复刻文件、构建、测试输出路径均相对此项目路径:
@@ -150,30 +156,21 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 
 ---
 
-## 4. 构建
+## 4. 构建（调用通用脚本 `_common/scripts/build.sh`,7 技能共用,维护 1 份）
 
 编译整个解决方案产出扫描器(测试要用的 `Jx3SvnHookCheckTool.exe` 在 `x64\Release\`):
-- MSBuild:用环境变量 `%MSBuildTool%`(本机 = `C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe`),见 §1 前置环境检查。
-
-> **前置:先编译 RUST 依赖工程(稳妥起见)**。`Jx3ResFileReaderAPI.vcxproj` link 依赖 `ClipLibX64.lib`/`KESMBaseX64.lib`(import lib,头从 `$(JX3ENGINE_Sword3)\Source\Common\RUST\{ClipLib,KESMBase}` 取),由两个 RUST 工程各自编译产出。⚠️ `FileParse.sln` **不包含**这两个工程(也无 `ProjectReference`),故 `FileParse.sln` rebuild **不会自动先编它们**——若 `$(JX3ENGINE_Sword3)\Source\Common\RUST\Lib\` 下的 `*.lib`/`*.dll` 缺失/过期/换机器未编,链接 `Jx3ResFileReaderAPI` 会 LNK1104 打不开 lib。稳妥起见每轮先编这两个(已编过且 lib 在则秒过):
-> ```bash
-> # bash 下 MSBuild 的 / 参数写成 // (防 bash 当成路径)。dos/cmd 下写 /p: 即可。
-> "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-> "$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-> ```
-> - 两个工程都是 `ConfigurationType=DynamicLibrary`,有 `Release|x64` 配置,出 `KESMBaseX64.lib`/`ClipLibX64.lib`(+ dll)到 `...\RUST\Lib\`。
-> - 编译这两个失败 → 先修(看 MSBuild stdout);没编过它们别直接编 `FileParse.sln`。
-> - dos/cmd 等价(你给的批处理原样):`call "%MSBuildTool%" "%JX3ENGINE_Sword3%\Source\Common\RUST\KESMBase\KESMBase_2019.vcxproj" /p:Configuration=Release /p:Platform=x64` 与 `...\ClipLib\ClipLib_2019.vcxproj ...`。
-
-- 命令(在仓库根 `项目路径` 执行;Claude 执行技能时 cwd 本就在仓库根,用相对的 `FileParse.sln` 即可):
+- `Pss.cpp`/`HeaderPss.h`/`Pss.h` 在 `Jx3ResFileReaderAPI.vcxproj`。
+- 命令(在仓库根,先跑过 §1 check_env 保证 MSBuildTool/JX3ENGINE_Sword3 在):
   ```bash
-  "$MSBuildTool" FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
+  REPO="$(pwd -W)"  # 项目路径=仓库根
+  bash "$REPO/.claude/skills/_common/scripts/build.sh" || exit 1
   ```
-  - bash 下 MSBuild 的 `/` 参数要写成 `//`(防 bash 当成路径)。或用 `//m` 并行。
+  - 脚本先编 RUST 依赖(KESMBase/ClipLib,`FileParse.sln` 不含这两个工程不会自动先编),再 rebuild `FileParse.sln` 出新 exe。设 `BUILD_SKIP_RUST=1` 可跳过 RUST 前置(lib 已最新时省时间,默认编)。
+  - RUST lib 缺失/过期/换机器未编 → 链接 LNK1104 / 扫描时 `Jx3ResFileReaderAPI.dll` 加载 `GetLastError(126)`(dll 没拷到 OutDir)。
 - **不要用 `Build.cmd`**:它带 `svn up` / git 推送 / PE 版本核验 / "svn 版本不超前就 skip build" 的副作用,不适合本闭环。本闭环只要 `FileParse.sln` rebuild 出新 exe。
 - 判定:退出码 0 且 `x64\Release\Jx3SvnHookCheckTool.exe` 更新时间刷新即编译成功。编译失败 → 看 `logs\Build.Sln.log`(若用 `Build.cmd`)或 MSBuild stdout,先修编译错再继续(别带着编译错去测试)。
 - PE 版本自检:本闭环跳过(那是发布管线的事)。如需,见 `CheckPEVersion.ps1`。
-
+- ⚠️ 编译遇 LNK1104 打不开 dll/exe → 多半有遗留 `Jx3*` 工具进程锁着,`tasklist | grep Jx3` 查、`taskkill //PID //F` 结束后重试(也可能是 RUST lib 没编,`build.sh` 已含 RUST 前置)。
 ---
 
 ## 5. 测试（全量）
@@ -184,7 +181,7 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 `ScanFileList.txt` 必须 **GBK(cp936)、每行 1 个绝对路径**。**不要用 Edit/Write 工具写它**(Write 按 UTF‑8 会破坏中文路径)。用脚本:
 ```bash
 REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
-python ".claude/skills/Pss代码同步/scripts/regen_scanlist.py" \
+python ".claude/skills/_common/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client/data/source/other" \
   --out   "$REPO/x64/Release/logs/ScanFileList.txt"
 ```
@@ -362,15 +359,12 @@ REPO="$(pwd -W)"  # 项目路径=仓库根(Windows 绝对)
 cd "$REPO"
 
 # 生成全量 GBK 清单
-python ".claude/skills/Pss代码同步/scripts/regen_scanlist.py" \
+python ".claude/skills/_common/scripts/regen_scanlist.py" \
   --root "$JX3_HD_Client/data/source/other" \
   --out   "x64/Release/logs/ScanFileList.txt"
 
-# 编译(先编 RUST 依赖 KESMBase/ClipLib,再编 FileParse.sln;FileParse.sln 不含这两个工程)
-"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/KESMBase/KESMBase_2019.vcxproj" //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-"$MSBuildTool" "$JX3ENGINE_Sword3/Source/Common/RUST/ClipLib/ClipLib_2019.vcxproj"  //p:Configuration=Release //p:Platform=x64 //nologo //v:minimal
-"$MSBuildTool" \
-  FileParse.sln //property:Configuration=Release //t:rebuild //nologo //v:minimal
+# 编译(调用通用脚本 _common/scripts/build.sh,7 技能共用;先编 RUST 依赖再编 FileParse.sln)
+bash "$REPO/.claude/skills/_common/scripts/build.sh" || exit 1
 
 # 全量扫描(ReadFileListFromSvnDB=1;清单 JOIN svn db 取元信息,仍扫清单全量)
 cd "x64/Release"

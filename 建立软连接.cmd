@@ -9,6 +9,7 @@ call :MakePathLink tani代码同步
 call :MakePathLink Pss代码同步
 call :MakePathLink SRScene代码同步
 call :MakePathLink State代码同步
+call :MakePathLink _common
 pause
 goto :eof
 
