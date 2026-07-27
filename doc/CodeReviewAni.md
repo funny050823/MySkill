@@ -22,6 +22,9 @@ MSBuildTool
     - 项目：d:\QCBase\trunk\SourceCode\Tool\HDTools\KResourceReader\Jx3ResFileReaderAPI\Jx3ResFileReaderAPI.vcxproj
     - 涉及文件：D:\QCBase\trunk\SourceCode\Tool\HDTools\KResourceReader\src\Ani\Ani.cpp
     - 复刻函数：Ani::ReadFile
+    - 涉及文件：D:\QCBase\trunk\SourceCode\Tool\HDTools\KResourceReader\src\Ani\Jx3CheckPlayerAni.cpp
+    - 复刻函数：KG3D_Animation::ReadFile
+    - 注意：这里需要复刻2个函数，这两个函数则重点是不一样的
 
   - 引擎原函数：
     - 项目：d:\JX3\trunk\Sword3\Source\KG3DEngineDX11\KG3DEngineE\Internal\Component\KG3D_Model\KG3D_Model_2019.vcxproj
@@ -35,10 +38,13 @@ MSBuildTool
 ## 3. 三类信息抽取（同步时的不变量，必须守）不同于`Pss代码同步`
 
 - 需要提取的信息有(Ani类成员)
-  - m_dwType:动画类型
-  - m_dwNumBones:如果是骨骼动画，m_dwNumBones>0，代表骨骼数，否则为0
-  - m_dwNumAnimatedVertices:如果是顶点动画，m_dwNumAnimatedVertices>0，代表顶点数，否则为0
-  - m_bKeyFrame:是否为抽帧ani
+  - Ani::ReadFile
+    - m_dwType:动画类型
+    - m_dwNumBones:如果是骨骼动画，m_dwNumBones>0，代表骨骼数，否则为0
+    - m_dwNumAnimatedVertices:如果是顶点动画，m_dwNumAnimatedVertices>0，代表顶点数，否则为0
+    - m_bKeyFrame:是否为抽帧ani
+  - KG3D_Animation::ReadFile
+    - 侧重点是分析骨骼匹配检查，具体细节你可以分析当前代码
 
 ## 4. 构建 同`Pss代码同步`
 

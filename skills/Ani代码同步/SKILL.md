@@ -39,27 +39,32 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 > **项目路径(仓库根)**(同 Pss):`KResourceReader` 仓库根 = 本 SKILL.md 上溯 4 级 = Claude 执行技能时的工作目录(Primary working directory)。说明路径写作 `项目路径\...`;bash 命令块用 `REPO="$(pwd -W)"`(Windows 绝对,exe 能接受),块内 `$REPO/...`;传 exe 的文件路径必须绝对(exe 内部 `SetCurrentDirectoryA` 到 client,相对路径失效)。Claude 执行技能 cwd 本就在仓库根,`pwd -W` 直接对。
 
 复刻侧（你要改的，UTF‑8，Edit/Write 安全）:
-- **复刻工程**:`项目路径\Jx3ResFileReaderAPI\Jx3ResFileReaderAPI.vcxproj`(`Ani.cpp` 编进此工程,以 `..\src\Ani\Ani.cpp` 引用;编译 `FileParse.sln` 时随此工程出 `Jx3ResFileReaderAPI.dll`)
-- `项目路径\src\Ani\Ani.cpp`（主,`Ani::ReadFile`）+ `Ani.h`（**自维护** `_ANI_FILE_HEADER`/`_BONE_ANI`/`_VERTEX_ANI`/`KG3D_ANIMATION_TYPE` 枚举/`ANI_FILE_MASK_*` 等结构,非 include 引擎——落后风险在结构/枚举值与 switch case,不在 include 同步)
+- **复刻工程**:`项目路径\Jx3ResFileReaderAPI\Jx3ResFileReaderAPI.vcxproj`(`Ani.cpp`/`Jx3CheckPlayerAni.cpp` 编进此工程;编译 `FileParse.sln` 时随此工程出 `Jx3ResFileReaderAPI.dll`)
+- ⚠️ **本技能需复刻 2 个函数,侧重点不同(都要对标引擎 `KG3D_Animation::LoadFromFile`)**:
+  - **① `Ani::ReadFile`**(`项目路径\src\Ani\Ani.cpp`)——**资源扫描版(精简)**:经 `KBase::GetAniInfo` 调用(见 §5),只抽 4 个汇总成员(§3.1),供 23 万 .ani 全量资源扫描。`Ani.h` **自维护** `_ANI_FILE_HEADER`/`_BONE_ANI`/`_VERTEX_ANI`/`KG3D_ANIMATION_TYPE` 枚举/`ANI_FILE_MASK_*` 等结构(非 include 引擎——落后风险在结构/枚举值与 switch case,不在 include 同步)。
+  - **② `KG3D_Animation::ReadFile`**(`项目路径\src\Ani\Jx3CheckPlayerAni.cpp`)——**骨骼匹配检查版(全帧)**:经 `IsValidBoneAni`→`LoadFromFile`→`ScanFile`→`ReadFile` 调用(见 §5),抽骨骼名数组 `m_ppszBoneName`+骨骼数 `m_dwNumBone`+全帧 RTS(供 `AdjustByBoneData` 比对骨骼名,结果经 `AniCheckResult` 传出)。`KResChecker` 对 `data\source\player\M1\M2\F1\F2\` 路径骨骼动画实调。
+  - 两者对齐同一引擎 `LoadFromFile`,但抽取内容不同:① 只要汇总数,② 要骨骼名+全帧。同步时**分别比对两个函数各自的 gap**(如 VERVION3 在 ① 已有、在 ② 也要补——见 §2.2)。
 - 若上面不存在,从本 SKILL.md 目录上溯 4 级再下 `src\Ani`:`%cd%\..\..\..\..\src\Ani\Ani.cpp`(`%cd%` 指本 SKILL.md 目录,非 CodeReviewAni.md 目录)。
 
-引擎侧（对标口径,**只读不改**;路径用环境变量 `%JX3ENGINE_Sword3%`,本机 = `D:\JX3\trunk\Sword3`）:
+引擎侧（对标口径,**只读不改**;路径用环境变量 `%JX3ENGINE_Sword3%`,本机 = `D:\JX3	runk\Sword3`）:
 - **引擎原函数工程**:`%JX3ENGINE_Sword3%\Source\KG3DEngineDX11\KG3DEngineE\Internal\Component\KG3D_Model\KG3D_Model_2019.vcxproj`(`KG3D_Animation.cpp` 在此工程;只读对标,不编不建)
-- 顶层原函数:`%JX3ENGINE_Sword3%\Source\KG3DEngineDX11\KG3DEngineE\Internal\Component\KG3D_Model\KG3D_Animation.cpp` 的 `KG3D_Animation::LoadFromFile`
+- 顶层原函数:`%JX3ENGINE_Sword3%\Source\KG3DEngineDX11\KG3DEngineE\Internal\Component\KG3D_Model\KG3D_Animation.cpp` 的 `KG3D_Animation::LoadFromFile`(**两个复刻函数都对标它**)
 - **枚举口径**:`KG3D_ANIMATION_TYPE`(`ANIMATION_NONE/BONE_RTS/VERTICES/...`)在 `%JX3ENGINE_Sword3%\Source\KG3DEngineDX11\KG3DEngineE\Internal\InternalPublish\Include\Model\KG3D_Animation.h`。复刻 `Ani.h` 有副本,逐项核对(尤其引擎有 `ANIMATION_BONE_RTS_BINDPOSE_UPDATE` 而复刻副本可能缺,见 §2)。
 - **结构口径**:`_ANI_FILE_HEADER`/`_BONE_ANI`/`_VERTEX_ANI` 等在引擎 `KG3D_Animation.h`/相关头;复刻 `Ani.h` 自维护副本,按字节对齐。
 
 对标源总览:
 | 层级 | 引擎文件 | 复刻对应 |
 |---|---|---|
-| 顶层 | `KG3D_Animation::LoadFromFile`(`KG3D_Animation.cpp:1277`) | `Ani::ReadFile`(`Ani.cpp:27`) |
-| 类型分派 | `switch(m_emAniType)`(BONE_RTS/VERTICES/BINDPOSE_UPDATE 等) | `switch(m_dwType)`(BONE_RTS/VERTICES/default) |
-| mask 分派 | `pHead->dwMask`(MASK/MASK_EF/VERVION2_EF/...) | `m_pHead->dwMask`(同) |
-| 枚举 | `KG3D_Animation.h` `KG3D_ANIMATION_TYPE` | `Ani.h` `KG3D_ANIMATION_TYPE` 副本 |
+| 顶层 | `KG3D_Animation::LoadFromFile`(`KG3D_Animation.cpp:1277`) | ① `Ani::ReadFile`(`Ani.cpp:27`);② `KG3D_Animation::ReadFile`(`Jx3CheckPlayerAni.cpp:579`) |
+| 类型分派 | `switch(m_emAniType)`(BONE_RTS/VERTICES/BINDPOSE_UPDATE 等) | ① `switch(m_dwType)`(BONE_RTS/VERTICES/default);② `switch(m_pHead->dwType)`(BONE_RTS/VERTICES/default) |
+| mask 分派 | `pHead->dwMask`(MASK/MASK_EF/VERVION2_EF/VERVION3/...) | ① `m_pHead->dwMask`(同);② `m_pHead->dwMask` |
+| 枚举 | `KG3D_Animation.h` `KG3D_ANIMATION_TYPE` | `Ani.h` `KG3D_ANIMATION_TYPE` 副本(① 用) |
 
 ---
 
 ## 2. 差异比对法（每轮第一步）
+
+⚠️ **两个复刻函数都要比对(① `Ani::ReadFile` 资源扫描版 / ② `KG3D_Animation::ReadFile` 骨骼检查版,见 §1)**:两者都对标引擎 `LoadFromFile`,但抽取内容不同(① 汇总数 / ② 骨骼名+全帧),gap 也不同。每轮 §2 比对要**分别核两个函数**:类型/mask/结构覆盖是否与引擎一致。典型:VERVION3 在 ① 早有(clip 抽 BoneCnt)、在 ② 之前缺(2026-07-27 已补,见 §2.2)。
 
 引擎 `LoadFromFile` 读 `_ANI_FILE_HEADER` → 按 `dwType`(`KG3D_ANIMATION_TYPE`)分派 → 再按 `dwMask`(`ANI_FILE_MASK_*`)分派读不同结构。复刻 `Ani::ReadFile` 同构(读 header → `switch(m_dwType)` → `switch(m_pHead->dwMask)`)。差异从**类型层 + mask 层 + 结构层**查。
 
@@ -78,6 +83,8 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 </br>
 > **VERVION3(Rust clip)解析说明**:引擎 `KG3D_Animation::LoadFromFile:1548` 用 `clip::Clip`→`Import(buf,len)`→`GetBoneCount()` 抽骨骼数。复刻 `Ani.cpp` 同样用 `clip::Clip`(基类 `m_pbyBuffer` 整文件 buffer 作 Import 入参),`m_bKeyFrame` 保持 false;`BoneCnt==0`(资源异常)由解析时 `OnErrorByGBK(ErrorLevel::ERROR_LEVEL_TOOL_ERR, ErrorType::ERROR_TYPE_RES_READ_EXCEPT, ...)` 报(不是 diff 判;Import 失败也用此报)。**构建依赖**:复刻工程链 `ClipLibX64.lib`+`KESMBaseX64.lib`(import lib,头在 `$JX3ENGINE_Sword3%\Source\Common\RUST\ClipLib` 与 `KESMBase`),运行时依赖 `ClipLibX64.dll`/`KESMBaseX64.dll`——已由 vcxproj `PostBuildEvent` 用环境变量自动拷到 `$(OutDir)`,换机器/重编译不漏。
 
+> **② `KG3D_Animation::ReadFile` 的 VERVION3(2026-07-27 已补)**:此前 ② 用 `switch(m_pHead->dwType)` 分派,VERVION3 的 dwType 是非标准值(实测 3754/3720,clip 格式特性)→ 落 switch default `KG_PROCESS_ERROR(false)` → ReadFile 返 false → `IsValidBoneAni` 的 `KG_PROCESS_ERROR(ani.LoadFromFile)` 失败 → `nResult` 保持初值 `eUnkownError` → 骨骼匹配检查对 clip **完全没做**(实测 46712 个 player 路径 clip 报 eUnkownError)。现已对标引擎(switch 前 `if(dwMask==VERVION3)` 拦截):用 `clip::Clip` 抽 `GetBoneCount()`+`GetBoneName(i)` 填 `m_dwNumBone`/`m_ppszBoneName`/`m_bHasBoneName=TRUE` → `AdjustByBoneData` 能正常比对骨骼名(实测改后检出 537 个 eBoneMismatch 真问题)。详见记忆 `project_ani_clip_vervion3_bonecheck`。
+
 ### 2.3 结构层
 - 引擎 `_ANI_FILE_HEADER`/`_BONE_ANI`/`_BONE_ANI_EF`/`_BONE_ANI_VERSION2`/`_BONE_ANI_VERSION2_EF`/`_VERTEX_ANI`/`_VERTEX_ANI_EF`/`_VERTEX_ANI_VERSION2`/`_VERTEX_ANI_VERSION2_EF` 等。
 - 复刻 `Ani.h` 副本逐个按字段/大小对齐。新增字段(常带新 mask/版本)→ 复刻结构同步,否则 `dwNumBones`/`dwNumAnimatedVertices` 读错位。
@@ -88,23 +95,32 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 
 ## 3. 抽取信息（同步时的不变量，必须守）
 
-Ani 只抽 **5 个成员**(不是 Pss 的三类,无音频、无明文路径):
+⚠️ **两个复刻函数抽取内容不同,分别守**:
+
+### 3.1 ① `Ani::ReadFile` 抽汇总成员(资源扫描版,供 `GetAniInfo` → Ani 表)
+文档列 4 个核心成员 + `m_dwMask`(也落 Ani 表),共 5 个:
 | 成员 | 含义 | 来源 | 落库 |
 |---|---|---|---|
 | `m_dwType` | 动画类型(`ANIMATION_BONE_RTS`/`ANIMATION_VERTICES`/...) | `_ANI_FILE_HEADER.dwType` | 决定 IsBone/IsVertex,不入 Ani 表 |
 | `m_dwNumBones` | 骨骼动画的骨骼数(骨骼动画>0,否则0) | `_BONE_ANI*.dwNumBones`(BONE_RTS 分支) | Ani 表 `BoneCnt` |
 | `m_dwNumAnimatedVertices` | 顶点动画的顶点数(顶点动画>0,否则0) | `_VERTEX_ANI*.dwNumAnimatedVertices`(VERTICES 分支) | Ani 表 `VertexCnt` |
 | `m_bKeyFrame` | 是否抽帧 ani | mask 是 `*_EF` 时置 true | 不入库,用于检查逻辑(KResChecker) |
-| `m_dwMask` | Ani 文件版本 mask(`ANI_FILE_MASK`/`_VERVION2`/`_EF`/`_VERVION3` 等) | `_ANI_FILE_HEADER.dwMask`(`Ani.cpp` `m_dwMask = m_pHead->dwMask`) | Ani 表 `dwMask` 列(`InsertAniResult` 第4列,`insert into Ani (FilePath,BoneCnt,VertexCnt,dwMask)`);另 `AniMask` 表存 mask 值→中文描述映射(由 `GetAniMaskTypeMap()` 填) |
+| `m_dwMask` | Ani 文件版本 mask(`ANI_FILE_MASK`/`_VERVION2`/`_EF`/`_VERVION3` 等) | `_ANI_FILE_HEADER.dwMask`(`Ani.cpp` `m_dwMask = m_pHead->dwMask`) | Ani 表 `dwMask` 列;另 `AniMask` 表存 mask 值→中文描述映射(由 `GetAniMaskTypeMap()` 填) |
 
 **`m_dwMask` 抽取要点**:
 - `Ani::ReadFile` 开头 `m_dwMask = m_pHead->dwMask` 取文件版本 mask,**在类型/mask 分派之前**(所有分支共用,必须先取)。
-- mask 值→描述映射在 `Ani::GetAniMaskTypeMap()`(静态,列 7 个 `ANI_FILE_MASK_*` 常量及描述),经 `KBase::GetAniMaskTypeMap()` 暴露给报告层,落 `AniMask` 表(`dwMask,Msg`)。
-- 同步新增 mask(引擎新版本格式)时:**①** `Ani.h` 加 `ANI_FILE_MASK_*` 常量;**②** `GetAniMaskTypeMap()` 里 `emplace_back` 补该 mask+描述;**③** `ReadFile` 的 mask 分派(`switch(m_pHead->dwMask)`)补 case。三处都补,否则新 mask 的 ani 落 default、AniMask 表缺映射。
+- mask 值→描述映射在 `Ani::GetAniMaskTypeMap()`,经 `KBase::GetAniMaskTypeMap()` 暴露给报告层,落 `AniMask` 表(`dwMask,Msg`)。
+- 同步新增 mask(引擎新版本格式)时:**①** `Ani.h` 加 `ANI_FILE_MASK_*` 常量;**②** `GetAniMaskTypeMap()` 里 `emplace_back` 补该 mask+描述;**③** `ReadFile` 的 mask 分派(`switch(m_pHead->dwMask)`)补 case。三处都补。
 
-**同步任何新类型/mask/结构时,确保对应分支仍正确抽这 5 个**(尤其 `dwNumBones`/`dwNumAnimatedVertices` 从正确结构的正确字段取、`m_dwMask` 在分派前先取)。这是 Ani 技能的"不变量"——同步不该改变现有 ani 的 BoneCnt/VertexCnt/Mask。
+**同步任何新类型/mask/结构时,确保 ① 对应分支仍正确抽这 5 个**(尤其 `dwNumBones`/`dwNumAnimatedVertices` 从正确结构的正确字段取、`m_dwMask` 在分派前先取)。同步不该改变现有 ani 的 BoneCnt/VertexCnt/Mask。
 
----
+### 3.2 ② `KG3D_Animation::ReadFile` 抽骨骼名(骨骼匹配检查版,供 `IsValidBoneAni` → AdjustByBoneData)
+侧重点是**骨骼匹配检查**(与 ① 抽汇总数不同):抽骨骼名数组 `m_ppszBoneName` + 骨骼数 `m_dwNumBone`(+ 全帧 RTS,供播放/详尽检查),经 `AdjustByBoneData` 与骨骼 txt 比对骨骼名 → `AniCheckResult`(`eNotFoundError` 合法/`eBoneMismatch` 骨骼数不匹配/`eNotFoundBoneName`/`eCanRepair`/`eNotBoneName`)。
+- 抽取关键成员:`m_dwNumBone`(骨骼数,对标 `m_dwNumBones`)、`m_ppszBoneName`(骨骼名数组,`AdjustByBoneData` 行 1043-1088 遍历它比对)、`m_bHasBoneName`(标志,设 TRUE 才会走到骨骼名比对,否则报 eNotBoneName)。
+- 不变量:同步时确保 ② 对应分支仍正确抽骨骼名(骨骼名从 `clip::Clip::GetBoneName(i)`[VERVION3] 或 `_BONE_ANI*` 结构读[其他 mask]取)。**同步不该改变现有 ani 的骨骼匹配检查结果**。
+- ⚠️ ② 不经 `GetAniInfo`/不落 Ani 表;它经 `IsValidBoneAni`→`AdjustByBoneData`→`AniCheckResult` 传出,落 `Result` 表(ErrType=`ERROR_TYPE_ANI_VALID_BONE(=20)+eResult`,如 eBoneMismatch=26/eUnkownError=24/eNotBoneName=23,见记忆 `project_ani_clip_vervion3_bonecheck`)。
+- 详见 §2.2(VERVION3 在 ② 的处理)与记忆 `feedback_ani_two_readfiles_no_merge`(两函数不合并的原因)。
+
 
 ## 4. 构建（调用通用脚本 `_common/scripts/build.sh`,7 技能共用,维护 1 份;对 Ani 尤其重要）
 
@@ -152,7 +168,8 @@ ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 \
   "$REPO/x64/Release/logs/ScanFileList_ani.txt"
 ```
 - `ReadFileListFromSvnDB=1` → 走 `CopyDataFromWCDBList`:清单(ScanFileListInput)INNER JOIN svn wc.db 取清单文件的元信息(changed_revision/date/author)填 FileList,再 `ProcessMultiThreadMain` 解析——**仍扫清单全量**(不漏文件),只是 FileList 多带 svn 元信息、多~8s 查 svn db。
-- **Ani 调用路径**(与 Pss 不同):`Jx3SvnHookCheckTool.exe` → `KResChecker` 遇 `.ani` → `Jx3ResFileReaderLoader::m_pIBase->GetAniInfo` → `KBase::GetAniInfo`(`KBase.cpp`)→ `kg_ani::Ani p; p.ScanFile(pszFile)` → `Ani::ReadFile` → 抽 4 成员 → `InsertAniResult` 进 Ani 表。**不经 reader 工厂 `AddFileType`**(那 30 多注册不含 "ani")——Ani 是经 `GetAniInfo` 这条专用路径调用的。
+- **① `Ani::ReadFile` 调用路径**(资源扫描,与 Pss 不同):`Jx3SvnHookCheckTool.exe` → `KResChecker` 遇 `.ani` → `Jx3ResFileReaderLoader::m_pIBase->GetAniInfo` → `KBase::GetAniInfo`(`KBase.cpp`)→ `kg_ani::Ani p; p.ScanFile(pszFile)` → `Ani::ReadFile` → 抽 5 成员 → `InsertAniResult` 进 Ani 表。**不经 reader 工厂 `AddFileType`**(那 30 多注册不含 "ani")——Ani 是经 `GetAniInfo` 这条专用路径调用的。
+- **② `KG3D_Animation::ReadFile` 调用路径**(骨骼匹配检查):`KResChecker` 对 `data\source\player\M1\M2\F1\F2\` 路径骨骼动画(`KResChecker.cpp:1032 else if(bIsBone)`)→ `IsValidBoneAni` → `KBase::IsValidBoneAni` → `kg_check_ani_bone::IsValidBoneAni`(`Jx3CheckPlayerAni.cpp`)→ `KG3D_Animation::LoadFromFile`→`ScanFile`→`ReadFile` 抽骨骼名 → `AdjustByBoneData` 比对骨骼表 → `AniCheckResult` 传出 → 落 Result 表(`ErrType=20+eResult`)。
 
 ### 5.3 读报告
 - 报告目录:`x64\Release\logs\JX3\trunk\` 下最新时间戳子目录。`ls -t logs/JX3/trunk/ | head -1`。
@@ -160,6 +177,7 @@ ReadFileListFromSvnDB=1 bTest=1 ForDebug=0 \
 - `ScanResult.db`(Ani 技能关注这两表):
   - **`Ani`**:每行一个解析成功的 ani,字段 `FilePath,BoneCnt,VertexCnt`(+ 新版 exe 加 `dwMask` 列;=§3 的 m_dwNumBones/m_dwNumAnimatedVertices/m_dwMask)。本机约 23 万行。另有 `AniMask` 表(`dwMask,Msg`)存 mask 值→中文描述映射。
   - **`Result`**:`ErrLevel=7` 且 `File` 以 `.ani` 结尾(或 `ExtName=ani`)= 解析失败。Ani 落后多表现为漏抽(Ani 表字段错)而非失败。
+  - **`Result` 也含 ② `KG3D_Animation::ReadFile` 骨骼匹配检查的报错**:`data\source\player\M1\M2\F1\F2\` 路径骨骼动画经 `IsValidBoneAni`→`AdjustByBoneData` 比对骨骼名,结果落 Result 表,`ErrType = ERROR_TYPE_ANI_VALID_BONE(=20)+eResult`(eNotFoundError=20 合法不报 / eNotBoneName=23 / eUnkownError=24 / eBoneMismatch=26 / eNotFoundBoneName=27)。改 ② 的 VERVION3 等分支后,看这些报错变化(如 eUnkownError 消失、eBoneMismatch 出现=真问题检出)。
   - 关联视图:`ResultAni`/`ResultAniBoneOver`/`ResultAniVertexOver`(骨骼/顶点数超标告警)。
 
 ### 5.4 音频标签扫描
