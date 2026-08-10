@@ -109,6 +109,8 @@ entity 段每个 entity 的 `KSREntity::LoadFromFile`(`KSREntity.cpp:776`)按 `d
 
 > 实操:grep 引擎 `KSREntity::LoadFromFile` 的 `if(dwVersion>=` 取分支上限,与复刻 `SRScene.cpp` 的 `if(*pdwVersion>=` 比对(§2.2);grep `KSRScene::_LoadSREntity` 的 `Read(...sizeof...)` 顺序与复刻 entity 循环 `Reference/SkipData` 顺序比对(§2.3);区分"字节布局差异"(要对齐)与"运行时逻辑差异"(复刻跳过即可)。结论写进当轮记录(补了哪个版本分支/对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有版本分支落后)**:§2.2 的 `>=1`/`>=2` 比对只核当前已知分支,发现不了**引擎新加的 `>=N+1` 分支**(entity 无 switch case,靠 `if(dwVersion>=N)` 递增,易漏)。核对时:① grep 引擎 `KSREntity::SaveToFile`(`KSREntity.cpp`)的 `s_dwVersion = N` 得当前写盘版本;② 核复刻 `SRScene.cpp` 的 `if(*pdwVersion>=N)` 分支覆盖到该版本、每段 `SkipData` 字节数与引擎一致(entity 字段错位会让后续 `pbHaveSMTemplate` + SMTemplate 路径读错位漏抽);③ 补新分支后,后续若有打印"怀疑异常"阈值要上移。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(SRScene 多数文件无 entity,数据集未触发),逐函数核对才能发现预防性落后项。**2026-08-07 教训:SRScene entity V3(m_bAcceptDecal)就是此法发现并补的。**
+
 ---
 
 ## 3. 一类信息抽取（同步时的不变量，必须守）

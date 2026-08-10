@@ -91,6 +91,8 @@ description: 把 Ani 复刻解析器(Ani::ReadFile)与引擎原函数(KG3D_Anima
 
 > 实操:grep 各取两侧 `ANIMATION_*`/`ANI_FILE_MASK_*`/`_BONE_ANI*`/`_VERTEX_ANI*` 做集合差 + 结构字段对比,逐项按 2.1/2.2/2.3 核实。结论写进当轮记录。
 
+> ⚠️ **逐函数字节核对(必做,防已有 case 落后)**:集合差/结构对比只找缺的类型/mask,发现不了**已有 case 的 per-type 读取内部版本分支落后**。① ② 两个复刻函数都要逐字节核对与引擎 `KG3D_Animation::LoadFromFile` 对齐:核 ① `Ani::ReadFile` 的 `switch(dwMask)` 各分支、② `KG3D_Animation::ReadFile` 的 `switch(dwType)`+`switch(dwMask)` 各分支是否与引擎该分支读的字节数一致;各 mask 的结构 `_BONE_ANI*`/`_VERTEX_ANI*` 字段偏移一致(尤其 `dwNumBones`/`dwNumAnimatedVertices`)。引擎无 `s_dwVersion` 升版时核结构即可;若引擎某 mask 加字段,复刻要跟。注意 ② 只查 `data\source\player`/`npc_so`(`data_mb` 不查),核对时区分"检查范围外读错也无影响"。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能未触发),逐函数核对才能发现预防性落后项。
+
 ---
 
 ## 3. 抽取信息（同步时的不变量，必须守）

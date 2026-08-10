@@ -120,6 +120,8 @@ description: 把 Tani 复刻解析器(Tani::ReadFile)与引擎原函数(KG3D_Ani
 
 > 实操:grep 各取两侧 `ANIMTAG_*` 做 case 集合差(§2.1),对每个标签 grep `dwVersion >=|dwVersion ==|case [0-9]` 各取两侧分支上限(§2.2),grep 各标签结构体名比字段/大小(§2.3),再人工逐项按 §2.1/§2.2/§2.3 核实(注意 §2 顶部的"字节布局 vs 运行时默认"区分)。结论写进当轮记录(改了哪个标签/补了哪个版本分支/对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有 case 落后)**:case 集合差只找顶层 switch 缺的新标签类型,发现不了**已有标签的 `Group_Data::LoadFromFile` 内部 `dwVersion` 版本分支落后**。集合差做完后,对 6 个标签的 `SFX`/`Sound`/`Motion`/`CameraAni`/`Texture`/`ForceField` 各自 `LoadFromFile`,逐字节核对与引擎 `KG3D_AnimationXxxTag_Group_Data::LoadFromFile` 对齐:① grep 引擎各标签 `SaveToFile` 的当前写盘版本(`g_currTagDataVersion`/`s_dwVersion`)得该标签最高版本;② 核复刻各标签 `switch(dwVersion)` 的 case/分支覆盖到该版本、每段 `Reference/SkipData` 总字节数与引擎一致(复刻 `SkipData` 折叠不要的字段,总字节要对);③ 常量值存疑查引擎编辑器 C# 枚举数枚举项。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能未触发),逐函数核对才能发现预防性落后项。
+
 ### 2.3 结构体层
 - 引擎:`KG3D_AnimationTani_Data.h`(`ANI_TAG_FILE_HEADER`/`ANI_TAG_BLOCK_HEADER`)+ 各 `KG3D_AnimationXxxTag_Group_Data.h`(`SFX_BIND_BLOCK_FILE_DATA`/`SFX_KEYFRAME_FILE_DATA`/`SoundDataSave*`/`MotionTagKeyframeSave`/`MotionTagDataInfoNew`/`CameraAniDataSave`/`TextureDataSaveVersion1`/`FORCE_FIELD_BIND_BLOCK_FILE_DATA`/`FORCE_FIELD_KEYFRAME_FILE_DATA` 等)。
 - 复刻:`HeaderTani.h` 的对应结构(**自维护副本**)。

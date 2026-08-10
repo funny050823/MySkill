@@ -114,6 +114,8 @@ description: 把 KRL 复刻解析器(KRL::ReadFile)与引擎原函数(KGRLLoader
 
 > 实操:grep 各取两侧 `KGRLFileType::V`/`case static_cast<int>(KGRLFileType` 做 switch case 集合差(§2.1);对每个版本,grep `KGRL_FILE_.*_V` 结构名两侧比对字段/大小(§2.2),用引擎 `KGRLLoader.cpp` 各 `LoadUnitFromBufferV*` 的 `Reference(sizeof(...))` 反推字节数与复刻 `KRL.cpp` 同版本函数逐一核对。区分"字节布局差异"(要对齐)与"运行时逻辑差异"(复刻跳过即可)。结论写进当轮记录(改了哪个版本/补了哪个结构/对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有 case 落后)**:case 集合差只找 switch 缺的新版本(V6+),发现不了**已有版本 V0-V5 的 `LoadUnitFromBufferV*` 内部结构布局落后**(引擎改某版本结构字段/大小/pack,复刻 `KGRLFormat.h` 副本没跟)。集合差做完后,对每个版本 V0-V5 逐字节核对:① 引擎 `KGRLFormat.h`(本机 `D:\JX3\trunk\Sword3\Include\SO3Represent\RLFile\KGRLFormat.h` 可直读)各 `KGRL_FILE_*_V*` 结构字段/顺序/`#pragma pack`/`sizeof` 与复刻 `KGRLFormat.h` 副本一致;② 引擎 `KGRLLoader.cpp` 各 `LoadUnitFromBufferV*` 的 `Reference(sizeof(...))` 读取顺序与复刻 `KRL.cpp` 同版本函数一致;③ 注意 pack 差异(V0 pack1、V1 UNITPROPERTY pack8、V2-V5 pack1)最隐蔽。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能无该版本文件),逐函数核对才能发现预防性落后项。
+
 ### 2.3 文件头/枚举常量
 - `RL_FILE_IDENTIFIER` = `'RL00'`(四字符码),两侧一致(`KGRLDefine.h:13`)。
 - `KGRLFileType` 枚举值 V0=1..V5=6 写进 `version` 字段,复刻副本与引擎同名同值。

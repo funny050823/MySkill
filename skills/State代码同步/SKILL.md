@@ -131,6 +131,8 @@ state 段每个 state 的 `_LoadState`(引擎 `:80`)/`KState_Load`(复刻 `:18`)
 
 > 实操:grep 引擎 `_LoadState` 的 `if(dwVersion>=` / `>= 0x` 取分支上限,与复刻 `KState_Load` 的 `if(*pdwVersion>=` 比对(§2.2);grep `KG3D_LoadStateFileData` 的 `dwExtend[` 各槽含义与复刻 `dwExtend[` 比对(§2.1);确认 behavior/condition 段无 `_ReadString`(§2.3)。区分"字节布局差异"(要对齐)与"运行时逻辑差异"(复刻跳过即可)。结论写进当轮记录(补了哪个版本分支/对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有版本分支落后)**:§2.2 的 `>=0x01..0x04` 比对只核当前已知分支,发现不了**引擎新加的 `>=0x05+`**(state 无 switch case,靠 `if(*pdwVersion>=N)` 递增,易漏)。核对时:① grep 引擎 `_LoadState`(`KG3D_StateFile.cpp`)的 `if(dwVersion>=` 取**所有**分支上限(不止已知 0x04);② 核复刻 `KState_Load` 的 `if(*pdwVersion>=N)` 覆盖到引擎最高版本、每段 `Reference/SkipData` 字节数与引擎一致(state 字段错位会让 model/ani/socket 的 `pnStringIndex` 读错位、`ReadString` 取乱码路径);③ `dwExtend[4]` stringStart 错位是最隐蔽漏抽点(所有 `ReadString` 路径乱码)。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能未触发),逐函数核对才能发现预防性落后项。
+
 ---
 
 ## 3. 一类信息抽取（同步时的不变量，必须守）

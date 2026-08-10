@@ -106,6 +106,8 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 
 > 实操:用 grep 各取两侧的 `PARSYS_LAUNCHER_*`/`KG3D_PARSYS_FEID_*`/`PARSYS_CT_*`/结构体名做 case/类型集合差(§2.1-2.4),grep `PARSYS_VERSION|dwVersion >=|dwVersion ==|MATINS_VERSION` 比版本分支与版本常量(§2.5),再人工(你)逐项按上面五层核实。把结论写进当轮记录(改了哪个类型、补了哪些字段/版本分支、对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有 case 落后)**:case 集合差只找"switch 缺的新类型",发现不了**已有 case 的 per-type `ReadData` 内部版本分支落后**(复刻有 case 但 `ReadData` 缺新版分支)。集合差做完后,对每个已有发射器/模块的 `KG3D_ParticleXxxLauncher_ReadData`/`KG3D_ParticleModule_ReadData`,逐字节核对与引擎 `KG3D_ParticleXxxLauncher::ReadData` 对齐:① grep 引擎 `SaveToFile` 的当前写盘版本(`s_dwVersion`/`dwVersion=N`)得该类型最高版本;② 核复刻 `ReadData` 的 `dwVersion>=N` 分支覆盖到该版本、每段 `Reference/SkipData` 总字节数与引擎一致;③ "怀疑异常了"打印阈值 = 引擎最高版本+1(补新分支后上移);④ 常量值存疑查引擎编辑器 C# 枚举数枚举项(cpp 注释可能过时)。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能未触发),逐函数核对才能发现预防性落后项。
+
 ---
 
 ## 3. 三类信息抽取（同步时的不变量，必须守）

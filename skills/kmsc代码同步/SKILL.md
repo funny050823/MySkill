@@ -108,6 +108,26 @@ description: 把 Kmsc 复刻解析器(Kmsc::ReadFile)与引擎原函数(KPlotLoa
 
 > 实操:grep 各取两侧 `MOT_*`/`EAT_*` 做 case 集合差(§2.2/§2.3),grep `dwVersion|pdwVersion|>= 0x|> 0x` 比版本分支上限(§2.5),再人工逐项按 2.2/2.3/2.4/2.5 核实。结论写进当轮记录(改了哪个类型/补了哪个版本分支/对应引擎文件:行)。
 
+> ⚠️ **逐函数字节核对(必做,防已有 case 落后)**:case 集合差只找 `NewAction`/`NewObject` 缺的新类型,发现不了**已有 case 的 `KMovieActionXxx::LoadFromFile` 内部 `dwVersion` 版本分支落后**(复刻有 case 但 LoadFromFile 缺新版分支)。集合差做完后,对每个已有动作的 `LoadFromFile`,逐字节核对与引擎 `KMovieActionXxx::LoadFromFile` 对齐:① grep 引擎该动作 `SaveToFile` 的当前写盘版本(`s_dwVersion`/`dwVersion=N` 在 SaveToFile 里)得该动作最高版本;② 核复刻 `LoadFromFile` 的 `*pdwVersion>=N` 分支覆盖到该版本、每段 `Reference/SkipData` 总字节数与引擎一致(kmsc 动作块共享同一 buffer 顺序推进,末尾少跳字节会让后续动作块错位、整个 kmsc 失败);③ "怀疑异常了"打印阈值 = 引擎最高版本+1(补新分支后上移,如 MetaFacePose 补 V4/V5 后阈值 `>=4`→`>=6`);④ 常量值存疑(如 EMPA_COUNT)查引擎编辑器 AutoGenCode C# 枚举(`KMovieTypeDef.cs`)数枚举项(cpp 注释可能过时,如 `EMPA_COUNT//200` 实际 202)。详见 `_common/perfunc_bytecheck_guide.md`。"baseline 0 失败"≠无落后(数据集可能未触发),逐函数核对才能发现预防性落后项。**2026-08-07 教训:kmsc MetaFacePose V4/V5 落后就是用户复查发现的,集合差漏检。**
+
+> ⚠️ **版本超界报错约定(写/改 LoadFromFile 必守,2026-08-10 定)**:各动作 `LoadFromFile` 末尾的"超版本预期"检查,**不写静默 `KG_PRINT("怀疑异常了")`,改为显式 `OnErrorByGBK` 报工具错误**(进 Result 表可统计,但不中断解析——`bResult=true` 照常返回,动作仍按当前逻辑解析完成)。标准写法(照此照搬,勿改):
+> ```cpp
+> if ((*pdwVersion >= <引擎最高版本+1>))
+> {
+>     m_pReadFileBase->OnErrorByGBK(ErrorLevel::ERROR_LEVEL_TOOL_ERR, ErrorType::ERROR_TYPE_TOOL_ERR, "%s:%d\t异常了.怀疑协议有调整", __FUNCTION__, __LINE__);
+> }
+> ```
+> - **阈值 X = 引擎该动作 `SaveToFile` 当前写盘版本 +1**(逐函数核对得,见上条)。补了新版本分支后阈值上移(不是固定值)。
+> - **ErrorType 用 `ERROR_TYPE_TOOL_ERR`**(工具错误,语义=复刻只支持到当前版本、遇更高版本=工具需同步),**勿用 `ERROR_TYPE_FILESIZE_0`**(语义不符)。
+> - **Msg 用 `"%s:%d\t异常了.怀疑协议有调整"` + `__FUNCTION__, __LINE__`**——报错带函数名:行号,定位到具体哪个动作哪行超界(各点不同)。
+> - **三种形式都改,KG_PROCESS_ERROR 去留按形式**:
+>   - **①标准** `if(IsDebugMode && *pdwVersion>=X){KG_PRINT("怀疑异常了")}`(末尾超界检查,无后续失败):改 `if(*pdwVersion>=X){ OnErrorByGBK(...) }`,**不中断**(去 IsDebugMode,无 KG_PROCESS_ERROR,`bResult=true`)。
+>   - **③三元** `(*pdwVersion>0)?"怀疑异常了":"？"`:同①,改 `if(*pdwVersion>=X){ OnErrorByGBK(...) }` 不中断。
+>   - **②switch default** `default: if(IsDebugMode){KG_PRINT} KG_PROCESS_ERROR(false)`:把 `if(IsDebugMode){KG_PRINT}` 改为无条件 `OnErrorByGBK(...)`(去 IsDebugMode,无阈值 default 直接报;有阈值的如 `if(>=2)` 保留阈值条件),**保留 `KG_PROCESS_ERROR(false)`**——default 是复刻完全没处理该版本(buffer 没推进),必须失败,OnErrorByGBK 只加可统计标记。**勿去掉 KG_PROCESS_ERROR**(否则后续动作块错位)。
+> - **不改**:④`if(IsDebugMode){KG_PRINT}` 无版本阈值、无条件、**非 default**(不在 switch 末尾、后无 KG_PROCESS_ERROR)的纯调试打印——任何版本都打印,改了变"任何版本都报错"。
+> - `m_pReadFileBase` 是 `KMovieObject`/`KMovieAction` 基类及所有派生共有的成员(见 `KMovieObject.h:31/252`),所有动作 LoadFromFile 内均可直接用。
+> - **仅 kmsc 适用**(其它技能报错方式见各自技能)。2026-08-10 已把 KMovieObject.cpp 的 ①③ 共 32 处 + ② 19 处统一改为 OnErrorByGBK 写法(②保留 KG_PROCESS_ERROR),零回归(当前数据集版本不超界/不进 default,不触发;将来引擎升版本时暴露)。
+
 ---
 
 ## 3. 两类信息抽取（同步时的不变量，必须守）
