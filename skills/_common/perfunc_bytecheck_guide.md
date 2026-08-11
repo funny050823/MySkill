@@ -25,9 +25,11 @@
 
 1. **找引擎该类型的 `SaveToFile`**,grep 当前写盘版本:
    ```
-   grep -nE 's_dwVersion|static.*dwVersion\s*=\s*[0-9]|dwVersion\s*=\s*[0-9]' 引擎Xxx.cpp
+   grep -nE 's_dwVersion|DWORD\s+dwVersion\s*=\s*(0x)?[0-9a-fA-F]+\s*;|DWORD\s+dwSaveVersion\s*=' 引擎Xxx.cpp
    ```
-   得该类型**当前最高版本 N**(`s_dwVersion = N` 或 `dwVersion = N` 在 SaveToFile 里)。这是 per-type 落后的**信号源**。
+   得该类型**当前最高版本 N**(`static DWORD s_dwVersion = N` 或 `DWORD dwVersion = N` 在 SaveToFile 里)。这是 per-type 落后的**信号源**。
+   - ⚠️ **两种写盘版本信号源都要 grep**:`static DWORD s_dwVersion = N`(静态变量)和 `DWORD dwVersion = N`(局部变量,在 SaveToFile 函数体内)。**只 grep `s_dwVersion` 会漏掉局部 `DWORD dwVersion` 的动作**(如 kmsc LookAt 用 `DWORD dwVersion = 0x4`、DynamicWeather 用 `DWORD dwVersion = 0x4`),导致误判复刻超界阈值正确、实则引擎已升版。
+   - ⚠️ **甄别 SaveToFile vs LoadFromFile**:`DWORD dwVersion = 0` 在 LoadFromFile 里是**局部读取变量**(读文件流的版本号,非写盘版本),不是信号源;在 SaveToFile 里才是写盘版本。grep 出多行时,按函数上下文甄别(看该行所在的 `::SaveToFile` 还是 `::LoadFromFile`)。
 
 2. **找引擎该类型的 `LoadFromFile`**,核它的版本分支 `if(dwVersion>=N)` / `case N` 覆盖到 SaveToFile 的最高版本。记下每个分支读的字段/字节数。
 
