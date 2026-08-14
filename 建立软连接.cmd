@@ -2,27 +2,14 @@
 
 set "desPath=d:\QCBase\trunk\SourceCode\Tool\HDTools\KResourceReader\.claude\skills"
 
-call :MakePathLink Ani代码同步
-call :MakePathLink kmsc代码同步
-call :MakePathLink krl代码同步
-call :MakePathLink tani代码同步
-call :MakePathLink Pss代码同步
-call :MakePathLink SRScene代码同步
-call :MakePathLink State代码同步
-call :MakePathLink _common
+call :Main
 pause
 goto :eof
 
-
-:MakePathLink
-    rem %1
-    if not exist "%cd%\skills\%1" (
-        mkdir "%cd%\skills\%1"
-    )
-    
-    if not exist "%desPath%\%1" (
-        echo link %1
-        mklink /d /j "%desPath%\%1" "%cd%\skills\%1"
+:Main
+    if exist "%desPath%" (
+        echo 【警告】path exist : %desPath%
+    ) else (
+        mklink /d /j "%desPath%" "%cd%\skills"
     )
     goto :eof
-    
