@@ -126,6 +126,7 @@ description: 把 Tani 复刻解析器(Tani::ReadFile)与引擎原函数(KG3D_Ani
 - 引擎:`KG3D_AnimationTani_Data.h`(`ANI_TAG_FILE_HEADER`/`ANI_TAG_BLOCK_HEADER`)+ 各 `KG3D_AnimationXxxTag_Group_Data.h`(`SFX_BIND_BLOCK_FILE_DATA`/`SFX_KEYFRAME_FILE_DATA`/`SoundDataSave*`/`MotionTagKeyframeSave`/`MotionTagDataInfoNew`/`CameraAniDataSave`/`TextureDataSaveVersion1`/`FORCE_FIELD_BIND_BLOCK_FILE_DATA`/`FORCE_FIELD_KEYFRAME_FILE_DATA` 等)。
 - 复刻:`HeaderTani.h` 的对应结构(**自维护副本**)。
 - 差异:引擎结构新增字段/改大小(常带新 `dwVersion` 分支)→ 复刻 `HeaderTani.h` 结构与版本分支都要同步,**否则 `Reference(sizeof(XxxData))` 读的长度错、后续错位**。这类错位最隐蔽(不报错但读错路径/音频位置)。用各 `Group_Data::SaveToFile`/`KG3D_AnimationTani_Data::SaveToFile` 反推 writer 字节数,与复刻 reader 逐一核对。
+- **标签内子枚举也要逐项核对(2026-09-03 发现盲区)**:`HeaderTani.h` 自维护的**标签内子枚举**(如 `KG3D_ANIMTAG_MOTION_BLOCK_TYPE`、`KG3D_ANIMTAG_SFX_FINISH_STATE`、`KG3D_ANIMTAG_SOUND_MOTION_CHANGE_STATE` 等)逐项值要与引擎一致——§2.1 只核 `KG3D_ANIMTAG_TYPE`(6 标签类型),这些子枚举没人核、易漏。实测发现 `KG3D_ANIMTAG_MOTION_BLOCK_TYPE` 缺 `ANIMTAG_MTBT_IKSYSTEM(9)`/`FEEDBACK(10)`/`FEEDBACK_FORCE(11)`(引擎 `IKG3D_AnimationTag_Data.h:297-309` COUNT=12,复刻原 COUNT=9),当前不影响字节解析(Motion case 1 按 `dwBlockLength[j]` 跳/读,不引用此枚举分派)但属副本滞后,已补齐。核对法:grep `enum .*ANIMTAG_MTBT` 等取两侧逐项比。
 
 ---
 
