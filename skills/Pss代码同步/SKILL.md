@@ -91,6 +91,7 @@ description: 把 Pss 复刻解析器(Pss::ReadFile)与引擎原函数(KG3D_Parti
 - 引擎:各 `KG3D_ParticleModule::ReadData` 派生(`KG3D_ParticleLauncher.cpp`/相关)。
 - 复刻:`Pss::KG3D_ParticleModule_ReadData` 的 `switch(*pnClassID)`/`switch(*pdwParamType)` 分派(约 `:491`/`:574`)。
 - 差异:新增模块 class/param 类型 → 复刻补 case + 对应读取。模块读取常含 `PARSYS_CT_*` 循环参数(如 `PARSYS_CT_PARTICLE_LIFETIME` 第2参循环次数 → `vdwLoopCount`),见 §3.3。
+- ⚠️ **`PARSYS_CT_*` 枚举副本(`Pss.h`)缺项会让 `PARSYS_CT_COUNT` 变小 → bounds check 失败**(2026-09-04 实例):复刻 `Pss.cpp` 有 `KG_PROCESS_ERROR(*pdwType < PARSYS_CT_COUNT)`,若引擎在 `COUNT` 前新增了真序列化的模块枚举(如 `PARSYS_CT_PARTICLE_FORCEWHIRLWIND_NEW` 新龙卷风,引擎工厂 `KG3D_ParticleModule.cpp:115` 有 case、会写进 .pss)而复刻 `Pss.h` 没跟,`COUNT` 比引擎少 1,含该模块的 .pss 解析时 `dwType=引擎新值=复刻 COUNT` → `< COUNT` false → **解析失败**。核对法:grep 引擎 `IKE3D_ParticleType.h` 的 `PARSYS_CT_*` 与复刻 `Pss.h` 逐项比,差项去引擎工厂 `KG3D_ParticleModule.cpp` 的 `CreateParticleModule` switch 确认有 case(真序列化)还是仅枚举定义无 case(纯预留如 `PARSYS_CT_PARTICLE_UIBOUND`,未注册无害)。真序列化的补:`Pss.h` 补枚举项(自动撑大 `COUNT` + `m_pModule_ReadDataFun[PARSYS_CT_COUNT]` 数组)+ `Pss.cpp` `m_pModule_ReadDataFun` 挂解析器(基类 param-driven 的挂通用 `&Pss::KG3D_ParticleModule_ReadData`,同引擎基类逻辑)。**与 §2.2 发射器层同理:"枚举缺项" ≠ "必须同步",要先区分真序列化 vs 纯预留。**
 
 ### 2.4 结构体层
 - 引擎:`KG3D_ParticleFileDeclare.h` 的 `KG3D_PARSYS_*_BLOCK` / `KG3D_PARSYS_*_STATIC_DATA`。
